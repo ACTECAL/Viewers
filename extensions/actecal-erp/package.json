@@ -1,0 +1,10 @@
+{
+  "name": "@ohif/extension-actecal-erp",
+  "version": "1.0.0",
+  "description": "OHIF extension for integrating with ACTECAL ERP",
+  "main": "src/index.js",
+  "dependencies": {
+    "paho-mqtt": "^1.1.0",
+    "uuid": "^9.0.0"
+  }
+}
