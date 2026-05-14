@@ -7,8 +7,17 @@ class ApiService {
     this.baseUrl = API_BASE_URL;
   }
 
-  async fetchStudyContext(studyInstanceUid) {
-    const response = await fetch(`${this.baseUrl}/studies/${studyInstanceUid}/context`, {
+  async getGCPToken(studyInstanceUids) {
+    const uids = Array.isArray(studyInstanceUids) ? studyInstanceUids.join(',') : studyInstanceUids;
+    const response = await fetch(`${this.baseUrl}/auth/gcp-token?uids=${uids}`, {
+      credentials: 'include',
+    });
+    return response.json();
+  }
+
+async fetchStudyContext(studyInstanceUids) {
+    const uids = Array.isArray(studyInstanceUids) ? studyInstanceUids.join(',') : studyInstanceUids;
+    const response = await fetch(`${this.baseUrl}/studies/context?uids=${uids}`, {
       credentials: 'include',
     });
     return response.json();

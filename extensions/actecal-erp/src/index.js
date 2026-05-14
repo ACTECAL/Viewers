@@ -64,36 +64,61 @@ function preRegistration() {
 
 function onModeEnter() {
   const queryParams = parse(window.location.search);
-  const studyInstanceUid = queryParams.StudyInstanceUID;
+  // Support both 'StudyInstanceUIDs' (plural) and the standard 'StudyInstanceUID'
+  const studyInstanceUids = queryParams.StudyInstanceUIDs?.split(',') ||
+                           (queryParams.StudyInstanceUID ? [queryParams.StudyInstanceUID] : []);
 
-  apiService.fetchDataSourceConfiguration(studyInstanceUid).then(({ datastoreId, region }) => {
-    const awsHealthImagingUrl = `https://runtime.medical-imaging.${region}.amazonaws.com/datastore/${datastoreId}/dicomWeb`;
+  if (studyInstanceUids.length === 0) {
+    console.error('No StudyInstanceUIDs found in the URL.');
+    return;
+  }
+
+  // 1. Fetch GCP Context and Bearer Token from ERP (using credentials: 'include')
+  Promise.all([
+    apiService.fetchStudyContext(studyInstanceUids),
+    apiService.getGCPToken(studyInstanceUids)
+  ]).then(([contexts, tokenData]) => {
+
+    // We use the context of the first study to define the primary DICOMweb gateway
+    const { projectId, location, datasetId, dicomStoreId } = contexts[0];
+    const gcpUrl = `https://healthcare.googleapis.com/v1/projects/${projectId}/locations/${location}/datasets/${datasetId}/dicomStores/${dicomStoreId}/dicomWeb`;
 
     const activeDataSource = extensionManager.getActiveDataSource();
 
     if (activeDataSource && activeDataSource[0]) {
+      // 2. Configure GCP Auth Headers
       activeDataSource[0].updateDataSourceConfiguration({
-        wadoUriRoot: awsHealthImagingUrl,
-        qidoRoot: awsHealthImagingUrl,
-        wadoRoot: awsHealthImagingUrl,
+        wadoUriRoot: gcpUrl,
+        qidoRoot: gcpUrl,
+        wadoRoot: gcpUrl,
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+        },
       });
 
-      apiService.fetchMeasurements(studyInstanceUid).then(measurements => {
-        measurements.forEach(measurement => {
-          measurementService.addRawMeasurement(
-            measurementSource,
-            'customAnnotationType',
-            measurement,
-            toMeasurementSchema
-          );
+      // 3. Fetch and Load Measurements for all studies in parallel
+      studyInstanceUids.forEach(uid => {
+        apiService.fetchMeasurements(uid).then(measurements => {
+          measurements.forEach(measurement => {
+            // Map the stored DB record back into OHIF's MeasurementService
+            measurementService.addRawMeasurement(
+              measurementSource,
+              'customAnnotationType',
+              measurement,
+              toMeasurementSchema
+            );
+          });
         });
+
+        // 4. Connect IoT Service for real-time collaboration on this specific study
+        IoTService.connect(uid);
       });
     } else {
       console.error('No active data source found.');
     }
+  }).catch(err => {
+    console.error('Failed to initialize study context or tokens:', err);
   });
-
-  IoTService.connect(studyInstanceUid);
 }
 
 function getCommandsModule({ servicesManager }) {
