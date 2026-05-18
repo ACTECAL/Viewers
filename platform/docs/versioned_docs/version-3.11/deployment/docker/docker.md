@@ -26,7 +26,7 @@ docker run -d -p 3000:80 ohif/app:v3.10.0-beta.33
 docker run -d -p 3000:80 ohif/app:v3.9.2
 ```
 
-This will run the Docker container and serve the OHIF Viewer at `http://localhost:3000`. You can name the container anything you want by adding the `--name` flag (e.g., `docker run -d -p 3000:80 --name ohif-viewer-container ohif/app:v3.10.0-beta.33`).
+This will run the Docker container and serve the OHIF Viewer at `http://localhost:3001`. You can name the container anything you want by adding the `--name` flag (e.g., `docker run -d -p 3000:80 --name ohif-viewer-container ohif/app:v3.10.0-beta.33`).
 
 
 ## Building the Docker Image From Source

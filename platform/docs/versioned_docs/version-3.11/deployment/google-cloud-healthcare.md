@@ -94,9 +94,9 @@ Images can even be transcoded on the fly if this is desired.
       ![Google Create Credentials](../assets/img/google-create-credentials.png)
 
     - Choose the "Web Application" type
-    - Add your domain (e.g. `http://localhost:3000`) to the Authorized JavaScript
+    - Add your domain (e.g. `http://localhost:3001`) to the Authorized JavaScript
     origins.
-    - Add your domain, plus `callback` (e.g. `http://localhost:3000/callback`) to the Authorized Redirect URIs.
+    - Add your domain, plus `callback` (e.g. `http://localhost:3001/callback`) to the Authorized Redirect URIs.
     - Save your Client ID for later.
 
 8. (Optional): Create a bucket containing DICOM files and import it into a Data Store

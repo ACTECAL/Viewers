@@ -37,7 +37,7 @@ A page embedded in an iframe is considered secure if it itself and every one of 
 
 ### Configuring/setting up a secure context
 
-[Local URLs are considered secure](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts#when_is_a_context_considered_secure), and as such whenever OHIF is accessed via a local URL (e.g. http://localhost:3000) it is running in a secure context. For example, in a development environment using the default webpack setup, OHIF can be deployed and accessed in a secure context at http://localhost:3000.
+[Local URLs are considered secure](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts#when_is_a_context_considered_secure), and as such whenever OHIF is accessed via a local URL (e.g. http://localhost:3001) it is running in a secure context. For example, in a development environment using the default webpack setup, OHIF can be deployed and accessed in a secure context at http://localhost:3001.
 
 The best alternative is to host OHIF over HTTPS.
 
@@ -97,10 +97,10 @@ Setting the appropriate CORS header varies per server or service that is hosting
 :::
 
 :::tip
-If Orthanc is the data source running in a Docker container composed with/behind nginx. And OHIF is being served at localhost:3000. The issue can be remedied by adding either of the following to Orthanc’s Docker container nginx.conf file.
+If Orthanc is the data source running in a Docker container composed with/behind nginx. And OHIF is being served at localhost:3001. The issue can be remedied by adding either of the following to Orthanc’s Docker container nginx.conf file.
 
 ```nginx
-add_header 'Access-Control-Allow-Origin' 'http://localhost:3000' always;
+add_header 'Access-Control-Allow-Origin' 'http://localhost:3001' always;
 ```
 
 Or

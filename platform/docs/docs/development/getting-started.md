@@ -95,7 +95,7 @@ no compromised packages should land on your machine by using this flag.
 You should see the following output:
 
 ```bash
-@ohif/app: i ｢wds｣: Project is running at http://localhost:3000/
+@ohif/app: i ｢wds｣: Project is running at http://localhost:3001/
 @ohif/app: i ｢wds｣: webpack output is served from /
 @ohif/app: i ｢wds｣: Content not from webpack is served from D:\code\ohif\Viewers\platform\viewer
 @ohif/app: i ｢wds｣: 404s will fallback to /index.html

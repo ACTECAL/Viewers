@@ -152,12 +152,12 @@ their JSON metadata is extracted).
 
 First you need to put the JSON file and the folder containing the dicom files
 inside your `public` folder. Since files are served from your local server the
-`url` for the JSON file will be `http://localhost:3000/LIDC-IDRI-0001.json` and
+`url` for the JSON file will be `http://localhost:3001/LIDC-IDRI-0001.json` and
 the dicom files will be
-`dicomweb:http://localhost:3000/LIDC-IDRI-0001/01-01-2000-30178/3000566.000000-03192/1-001.dcm`.
+`dicomweb:http://localhost:3001/LIDC-IDRI-0001/01-01-2000-30178/3000566.000000-03192/1-001.dcm`.
 
 After `yarn install` and running `yarn dev` and opening the browser at
-`http://localhost:3000/viewer/dicomjson?url=http://localhost:3000/LIDC-IDRI-0001.json`
+`http://localhost:3001/viewer/dicomjson?url=http://localhost:3001/LIDC-IDRI-0001.json`
 will display the viewer.
 
 Download JSON file from
@@ -176,11 +176,11 @@ Your public folder should look like this:
 It is important to URL encode the `url` query parameter especially if the `url`
 parameter itself also contains query parameters. So for example,
 
-`http://localhost:3000/viewer/dicomjson?url=http://localhost:3000/LIDC-IDRI-0001.json?key0=val0&key1=val1`
+`http://localhost:3001/viewer/dicomjson?url=http://localhost:3001/LIDC-IDRI-0001.json?key0=val0&key1=val1`
 
 should be...
 
-`http://localhost:3000/viewer/dicomjson?url=http://localhost:3000/LIDC-IDRI-0001.json?key0=val0%26key1=val1`
+`http://localhost:3001/viewer/dicomjson?url=http://localhost:3001/LIDC-IDRI-0001.json?key0=val0%26key1=val1`
 
 Notice the ampersand (`&`) is encoded as `%26`.
 :::

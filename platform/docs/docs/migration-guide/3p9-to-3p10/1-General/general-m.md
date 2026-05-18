@@ -105,7 +105,7 @@ Also, if you're running the viewer from a sub-route, you'll need to update the `
 devServer: {
   proxy: {
     '/dicom-microscopy-viewer': {
-      target: 'http://localhost:3000',
+      target: 'http://localhost:3001',
       pathRewrite: {
         '^/dicom-microscopy-viewer': `/${PUBLIC_URL}/dicom-microscopy-viewer`,
       },

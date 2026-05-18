@@ -130,7 +130,7 @@ SeriesInstanceUIDs.  This does NOT work with instance or study
 level parameters.  For example:
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8
 ```
 
 This will only open the viewer with one series (one displaySet) loaded, and no
@@ -140,7 +140,7 @@ Sometimes you need to only retrieve a subset of series in a study, you can do
 that by providing more than one series, separated by commas.  For example:
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8,1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8,1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10
 ```
 
 This will only open the viewer with two series (two displaySets) loaded, and no
@@ -153,7 +153,7 @@ series to be present too.  This is the same behavior can be
 achieved by using the `initialSeriesInstanceUID` parameter.  For example:
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&initialSeriesInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&initialSeriesInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8
 ```
 
 This will open all the series in the study, but the viewer will start with the
@@ -164,7 +164,7 @@ Note that you can combine these, if you want to load a specific set of series
 plus show an initial one as the first one selected, for example:
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8,1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10&initialSeriesInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8,1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10&initialSeriesInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10
 ```
 
 ### initialSopInstanceUID
@@ -173,7 +173,7 @@ You can also specify the initial SOP Instance to be displayed by using the
 `initialSopInstanceUID` parameter.  For example:
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8&initialSopInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095501.9
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8&initialSopInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095501.9
 ```
 
 This will open the study with the filtered series, and navigate to the slice 101
@@ -182,14 +182,14 @@ which happens to be the SOP Instance specified by the `initialSopInstanceUID`
 Note: again you can mix and match
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8,1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10&initialSeriesInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10&initialSopInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095510.8
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&SeriesInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095449.8,1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10&initialSeriesInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095506.10&initialSopInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095510.8
 ```
 
 You can even load the whole study and only specify the initial SOP Instance to be displayed. Although
 it will take more time to match, but it works as expected.
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&initialSopInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095510.8
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&initialSopInstanceUID=1.3.6.1.4.1.25403.345050719074.3824.20170125095510.8
 ```
 
 ### hangingProtocolId
@@ -201,7 +201,7 @@ hangingProtocolModule registration, but does not have to be active.
 For instance for loading a specific study in mpr mode from start you can use:
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&hangingProtocolId=@ohif/mnGrid
+http://localhost:3001/viewer?StudyInstanceUIDs=1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5&hangingProtocolId=@ohif/mnGrid
 ```
 
 ### token

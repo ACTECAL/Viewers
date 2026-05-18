@@ -60,7 +60,7 @@ In development, use proxy rewrites to handle relative asset paths. Example for `
 ```js
 proxy: {
   '/dicom-microscopy-viewer': {
-    target: 'http://localhost:3000',
+    target: 'http://localhost:3001',
     pathRewrite: {
       '^/dicom-microscopy-viewer': `/${PUBLIC_URL}/dicom-microscopy-viewer`,
     },

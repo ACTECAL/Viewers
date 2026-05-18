@@ -145,7 +145,7 @@ yarn playwright show-report tests/playwright-report
 
 ## Serving the viewer manually for development
 
-By default, when you run the tests, it will call the `yarn start` command to serve the viewer first, then run the tests, if you would like to serve the viewer manually, you can use the same command. The viewer will be available at `http://localhost:3000`. This could speed up your development process since playwright will skip this step and use the existing server on port 3000.
+By default, when you run the tests, it will call the `yarn start` command to serve the viewer first, then run the tests, if you would like to serve the viewer manually, you can use the same command. The viewer will be available at `http://localhost:3001`. This could speed up your development process since playwright will skip this step and use the existing server on port 3000.
 
 ## Accessing services, managers, configs and cornerstone in your tests
 

@@ -2,6 +2,8 @@
 
 window.config = {
   name: 'config/default.js',
+  apiBaseUrl:`https://api-dev.actecal.com`,
+  iotCoreBaseUrl:`https://api-dev.actecal.com`,
   routerBasename: null,
   // whiteLabeling: {},
   extensions: [],

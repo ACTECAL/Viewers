@@ -1,5 +1,6 @@
 // https://developers.google.com/web/tools/workbox/guides/codelabs/webpack
 // ~~ WebPack
+global.crypto = require('crypto');
 const path = require('path');
 const { merge } = require('webpack-merge');
 const webpack = require('webpack');

@@ -44,7 +44,7 @@ Then after you define the module, you can add it to the customizationService in 
 
 ```js
 customizationService: [
-    // Shows a custom route -access via http://localhost:3000/custom
+    // Shows a custom route -access via http://localhost:3001/custom
     '@ohif/extension-default.customizationModule.helloPage',
 ],
 ```
@@ -77,9 +77,9 @@ Then you can add it to the customizationService in the AppConfig and reference i
 
 ```js
 customizationService: [
-    // Shows a custom route -access via http://localhost:3000/custom
+    // Shows a custom route -access via http://localhost:3001/custom
     '@ohif/extension-default.customizationModule.helloPage',
-    // Shows a custom route -access via http://localhost:3000/second
+    // Shows a custom route -access via http://localhost:3001/second
     '@ohif/extension-default.customizationModule.secondPage',
 ],
 ```

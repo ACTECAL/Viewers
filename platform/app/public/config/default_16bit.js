@@ -5,7 +5,7 @@ window.config = {
   extensions: [],
   modes: [],
   customizationService: {
-    // Shows a custom route -access via http://localhost:3000/custom
+    // Shows a custom route -access via http://localhost:3001/custom
     // helloPage: '@ohif/extension-default.customizationModule.helloPage',
   },
   showStudyList: true,

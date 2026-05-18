@@ -86,6 +86,7 @@
     "cs3d:unlink": "node libs/@cornerstonejs/scripts/unlink-ohif-cornerstone-node-modules.mjs ."
   },
   "dependencies": {
+    "date-fns": "2.30.0",
     "execa": "8.0.1"
   },
   "optionalDependencies": {

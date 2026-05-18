@@ -61,7 +61,7 @@ in future requests).
 and example would be
 
 ```js
-http://localhost:3000/viewer?StudyInstanceUIDs=1.2.3.4.5.6.6.7&token=e123125jsdfahsdf
+http://localhost:3001/viewer?StudyInstanceUIDs=1.2.3.4.5.6.6.7&token=e123125jsdfahsdf
 ```
 
 

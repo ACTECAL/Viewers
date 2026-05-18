@@ -347,7 +347,7 @@ jobs:
           install-command: yarn install --frozen-lockfile --no-save
       - cypress/run-tests:
           cypress-command: |
-            npx wait-on@latest http://localhost:3000 && cd platform/app && npx cypress run --record --parallel
+            npx wait-on@latest http://localhost:3001 && cd platform/app && npx cypress run --record --parallel
           start-command: yarn run test:data && yarn run test:e2e:serve
 
   SECURITY_AUDIT:

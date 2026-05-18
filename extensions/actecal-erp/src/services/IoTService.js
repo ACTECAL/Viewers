@@ -2,7 +2,7 @@ import { Client } from 'paho-mqtt';
 import { MeasurementService } from '@ohif/core';
 
 const measurementService = new MeasurementService();
-const IOT_CORE_BASE_URL = process.env.IOT_CORE_BASE_URL;
+const IOT_CORE_BASE_URL =  window.config.iotCoreBaseUrl;
 
 class IoTService {
   constructor() {

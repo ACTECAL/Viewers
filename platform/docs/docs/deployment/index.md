@@ -253,7 +253,7 @@ configuration, and add a CORS setting to allow origin =
 
 Essentially, whenever the application connects to a remote resource, you will
 need to add the applications url to the allowed CORS Origins on that resource.
-Adding an origin similar to https://localhost:3000 will also allow for local
+Adding an origin similar to https://localhost:3001 will also allow for local
 testing.
 
 ### Securing Your Data

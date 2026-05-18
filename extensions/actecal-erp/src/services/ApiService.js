@@ -1,6 +1,6 @@
 import Cookies from 'js-cookie';
 
-const API_BASE_URL = process.env.API_BASE_URL;
+const API_BASE_URL = window.config.apiBaseUrl;
 
 class ApiService {
   constructor() {
