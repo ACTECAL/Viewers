@@ -136,6 +136,7 @@ export default function ModeRoute({
   /**
    * Validates study existence before loading the viewer.
    * Moved from PanelStudyBrowser.tsx to ensure validation runs in all modes
+   * Modified to use actecal-erp API data instead of default QIDO API
    */
   useEffect(() => {
     if (!ExtensionDependenciesLoaded || !studyInstanceUIDs?.length || !dataSource) {
@@ -145,14 +146,26 @@ export default function ModeRoute({
     const validateStudies = async () => {
       for (const studyInstanceUID of studyInstanceUIDs) {
         try {
-          const qidoForStudyUID = await dataSource.query.studies.search({
-            studyInstanceUid: studyInstanceUID,
-          });
+          // Check if actecal study context data is available from ApiService.js
+          if (window.actecalStudyContext && window.actecalStudyUids) {
+            const studyExists = window.actecalStudyUids.includes(studyInstanceUID);
+            if (!studyExists) {
+              console.warn('Study not found in actecal context:', studyInstanceUID);
+              navigate('/notfoundstudy');
+              return;
+            }
+            console.log('Study validated using actecal API data:', studyInstanceUID);
+          } else {
+            // Fallback to default QIDO API if actecal data is not available
+            const qidoForStudyUID = await dataSource.query.studies.search({
+              studyInstanceUid: studyInstanceUID,
+            });
 
-          if (!qidoForStudyUID?.length) {
-            console.warn('Study not found:', studyInstanceUID);
-            navigate('/notfoundstudy');
-            return;
+            if (!qidoForStudyUID?.length) {
+              console.warn('Study not found:', studyInstanceUID);
+              navigate('/notfoundstudy');
+              return;
+            }
           }
         } catch (error) {
           console.error('Error validating study:', studyInstanceUID, error);

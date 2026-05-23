@@ -3,6 +3,8 @@
 window.config = {
   name: 'config/default.js',
   apiBaseUrl:`https://api-dev.actecal.com`,
+    tenant:
+    'autolight',
   iotCoreBaseUrl:`https://api-dev.actecal.com`,
   routerBasename: null,
   // whiteLabeling: {},
@@ -108,10 +110,20 @@ window.config = {
       configuration: {
         friendlyName: 'AWS S3 Static wado server',
         name: 'aws',
-        wadoUriRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
-        qidoRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
-        wadoRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
-        qidoSupportsIncludeField: false,
+        // wadoUriRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
+        // qidoRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
+        // wadoRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
+
+          wadoUriRoot:
+    'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
+
+  qidoRoot:
+    'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
+
+  wadoRoot:
+    'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
+
+    qidoSupportsIncludeField: false,
         imageRendering: 'wadors',
         thumbnailRendering: 'wadors',
         enableStudyLazyLoad: true,

@@ -1,16 +1,23 @@
 import Cookies from 'js-cookie';
 
 const API_BASE_URL = window.config.apiBaseUrl;
+const TENANT = window.config.tenant;
 
 class ApiService {
-  constructor() {
-    this.baseUrl = API_BASE_URL;
+  constructor(userId) {
+    this.baseUrl =  `${API_BASE_URL}/erp/${TENANT}/dicom`;
+      this.userId =userId;
   }
 
+
   async getGCPToken(studyInstanceUids) {
+
     const uids = Array.isArray(studyInstanceUids) ? studyInstanceUids.join(',') : studyInstanceUids;
-    const response = await fetch(`${this.baseUrl}/auth/gcp-token?uids=${uids}`, {
+    const response = await fetch(`${this.baseUrl}/gcp-token?uids=${uids}`, {
       credentials: 'include',
+        headers: {
+          "x-user-id": this.userId,
+        },
     });
     return response.json();
   }
