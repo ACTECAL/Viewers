@@ -49,6 +49,19 @@ async fetchStudyContext(studyInstanceUids) {
     return response.json();
   }
 
+  async fetchDraftReport(studyInstanceUid) {
+    const response = await fetch(`${this.baseUrl}/get-draft-report?studyInstanceUid=${studyInstanceUid}`, {
+      credentials: 'include',
+      headers: {
+        "x-user-id": this.userId,
+      },
+    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch draft report');
+    }
+    return response.json();
+  }
+
   async deleteMeasurement(annotationUID) {
     const response = await fetch(`${this.baseUrl}/measurements/${annotationUID}`, {
       method: 'DELETE',
@@ -82,6 +95,12 @@ async fetchStudyContext(studyInstanceUids) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),
+    });
+    return response.json();
+  }
+  async resolveShare(shareCode) {
+    const response = await fetch(`${this.baseUrl}/resolve-share?code=${shareCode}`, {
+      credentials: 'include',
     });
     return response.json();
   }

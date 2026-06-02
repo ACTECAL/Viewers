@@ -206,99 +206,75 @@ const apiService =
    STUDY INITIALIZATION
 ---------------------------- */
 
-async function initializeStudy(extensionManager) {
+async function initializeStudy(extensionManager, servicesManager) {
 
   try {
+    const { uiNotificationService } = servicesManager.services;
+    console.log("initializeStudy called");
 
-    console.log(
-      "initializeStudy called"
-    );
+    const queryParams = parse(window.location.search);
 
-    const queryParams =
-      parse(
-        window.location.search
-      );
+    console.log("Query Params:", queryParams);
 
-    console.log(
-      "Query Params:",
-      queryParams
-    );
+    const userId = queryParams.userId;
+    const tenant = queryParams.tenant;
 
-    const userId =
-  queryParams.userId;
+    console.log("USER ID:", userId);
+    console.log("TENANT:", tenant);
 
-const tenant =
-  queryParams.tenant;
+    const apiService = new ApiService(userId);
+    let studyInstanceUids = [];
+    let contexts;
+    let tokenData;
 
-console.log(
-  "USER ID:",
-  userId
-);
+    if (queryParams.sharecode) {
+      try {
+        const shareData = await apiService.resolveShare(queryParams.sharecode);
+        studyInstanceUids = shareData.studyInstanceUids;
+        contexts = shareData.contexts;
+        tokenData = shareData.tokenData;
+      } catch (err) {
+        uiNotificationService.show({
+          title: 'Share Link Invalid',
+          message: 'Failed to resolve the share link. It may be expired or invalid.',
+          type: 'error',
+          duration: 10000,
+        });
+        console.error("Share code resolution failed:", err);
+        return;
+      }
+    } else {
+      studyInstanceUids =
+        queryParams.StudyInstanceUIDs?.split(',') ||
+        (queryParams.StudyInstanceUID ? [queryParams.StudyInstanceUID] : []);
 
-console.log(
-  "TENANT:",
-  tenant
-);
+      if (!studyInstanceUids.length) {
+        console.log("No StudyInstanceUIDs found - showing default view");
+        return;
+      }
 
-const apiService = new ApiService(userId);
-    // URL:
-    // ?StudyInstanceUIDs=103,104
-
-    const studyInstanceUids =
-      queryParams
-        .StudyInstanceUIDs
-        ?.split(',') ||
-
-      (
-        queryParams
-          .StudyInstanceUID
-
-          ? [
-              queryParams
-                .StudyInstanceUID
-            ]
-
-          : []
-      );
-
-    console.log(
-      "Parsed IDs:",
-      studyInstanceUids
-    );
-
-    if (
-      !studyInstanceUids
-        .length
-    ) {
-
-      console.error(
-        "No StudyInstanceUIDs found"
-      );
-
-      return;
+      try {
+        const results = await Promise.all([
+          apiService.fetchStudyContext(studyInstanceUids),
+          apiService.getGCPToken(studyInstanceUids),
+        ]);
+        contexts = results[0];
+        tokenData = results[1];
+        
+        if (!tokenData || !tokenData.access_token) {
+          throw new Error("Invalid token received from backend");
+        }
+      } catch (authErr) {
+        uiNotificationService.show({
+          title: 'Authentication Error',
+          message: 'Failed to retrieve access token or study context for the data source.',
+          type: 'error',
+          duration: 10000,
+        });
+        console.error("Token fetch failed:", authErr);
+        return;
+      }
     }
-
-
-
-    /* ---------------------------
-       FETCH API DATA
-    ---------------------------- */
-
-    const [
-      contexts,
-      tokenData
-    ] =
-      await Promise.all([
-        apiService
-          .fetchStudyContext(
-            studyInstanceUids
-          ),
-
-        apiService
-          .getGCPToken(
-            studyInstanceUids
-          ),
-      ]);
 
       /* ---------------------------
    CONFIGURE DATA SOURCE
@@ -503,7 +479,7 @@ function preRegistration({  extensionManager,
   // Initialize viewer
   // initializeStudy(extensionManager);
 
-    initializeStudy(extensionManager);
+    initializeStudy(extensionManager, servicesManager);
 
 
 
@@ -581,6 +557,110 @@ function preRegistration({  extensionManager,
 
 
 /* ---------------------------
+   COMMANDS & TOOLBAR
+---------------------------- */
+
+import ShareModal from './components/ShareModal';
+
+function getCommandsModule({ servicesManager }) {
+  return {
+    actions: {
+      openShareModal: () => {
+        const { uiModalService, viewportGridService } = servicesManager.services;
+        const state = viewportGridService.getState();
+        const activeViewport = state.viewports[state.activeViewportIndex];
+        const studyInstanceUid = activeViewport?.StudyInstanceUID;
+
+        uiModalService.show({
+          content: ShareModal,
+          title: 'Share Study',
+          contentProps: { studyInstanceUid },
+          containerClassName: 'max-w-lg',
+        });
+      },
+      toggleFullscreen: () => {
+        const { panelService } = servicesManager.services;
+        const isFullscreen = !!document.fullscreenElement;
+
+        if (!isFullscreen) {
+          document.documentElement.requestFullscreen().catch(err => {
+            console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
+          });
+          // Collapse panels
+          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, { 
+            options: { leftPanelClosed: true, rightPanelClosed: true } 
+          });
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          }
+          // Expand panels when exiting fullscreen
+          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, { 
+            options: { leftPanelClosed: false, rightPanelClosed: false } 
+          });
+        }
+      },
+    },
+      definitions: {
+        openShareModal: {
+          commandFn: function(context) { return this.actions.openShareModal(context); },
+        },
+        toggleFullscreen: {
+          commandFn: function(context) { return this.actions.toggleFullscreen(context); },
+        },
+      },
+    };
+}
+
+function getToolbarModule({ commandsManager }) {
+  return [
+    {
+      name: 'Share',
+      id: 'Share',
+      uiType: 'ohif.radioGroup',
+      props: {
+        icon: 'link',
+        label: 'Share',
+        commands: 'openShareModal',
+      },
+    },
+    {
+      name: 'Fullscreen',
+      id: 'Fullscreen',
+      uiType: 'ohif.radioGroup',
+      props: {
+        icon: 'arrows-alt', // typical fullscreen icon
+        label: 'Fullscreen (f)',
+        commands: 'toggleFullscreen',
+      },
+    },
+  ];
+}
+
+
+import ReportingPanel from './components/ReportingPanel';
+import AIAnalysisPanel from './components/AIAnalysisPanel';
+
+function getPanelModule({ commandsManager, extensionManager, servicesManager }) {
+  return [
+    {
+      name: 'reporting',
+      iconName: 'document',
+      iconLabel: 'Report',
+      label: 'Reporting',
+      component: ReportingPanel,
+    },
+    {
+      name: 'aiAnalysis',
+      iconName: 'brain',
+      iconLabel: 'AI Analysis',
+      label: 'AI Analysis',
+      component: AIAnalysisPanel,
+    },
+  ];
+}
+
+/* ---------------------------
    EXPORT
 ---------------------------- */
 
@@ -590,5 +670,7 @@ export default {
     extensionId,
 
   preRegistration,
-
+  getCommandsModule,
+  getToolbarModule,
+  getPanelModule
 };

@@ -72,6 +72,9 @@
   ],
   "modes": [
     {
+      "packageName": "@ohif/mode-actecal-radiology"
+    },
+    {
       "packageName": "@ohif/mode-longitudinal"
     },
     {
