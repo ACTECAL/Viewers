@@ -7,6 +7,20 @@ const bindings = [
     isEditable: true,
   },
   {
+    commandName: 'setToolActive',
+    commandOptions: { toolName: 'WindowLevel' },
+    label: 'Window/Level (W)',
+    keys: ['w'],
+    isEditable: true,
+  },
+  {
+    commandName: 'setToolActive',
+    commandOptions: { toolName: 'WindowLevel' },
+    label: 'Window/Level (L)',
+    keys: ['l'],
+    isEditable: true,
+  },
+  {
     commandName: 'scaleUpViewport',
     label: 'Zoom In',
     keys: ['+'],

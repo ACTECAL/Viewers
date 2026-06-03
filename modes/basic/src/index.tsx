@@ -215,15 +215,16 @@ export function onModeExit({ servicesManager }: withAppTypes) {
 
 export const toolbarSections = {
   [TOOLBAR_SECTIONS.primary]: [
-    'MeasurementTools',
-    'Zoom',
-    'Pan',
-    'TrackballRotate',
     'WindowLevel',
-    'Capture',
-    'Layout',
+    'Pan',
+    'Zoom',
+    'StackScroll',
+    'MeasurementTools',
     'Crosshairs',
+    'invert',
+    'Reset',
     'MoreTools',
+    'Layout',
   ],
 
   [TOOLBAR_SECTIONS.viewportActionMenu.topLeft]: ['orientationMenu', 'dataOverlayMenu'],

@@ -139,8 +139,13 @@ export function onModeEnter({
   panelService,
   segmentationService,
 }: withAppTypes) {
-  const { measurementService, toolbarService, toolGroupService, customizationService } =
-    servicesManager.services;
+  const {
+    measurementService,
+    toolbarService,
+    toolGroupService,
+    customizationService,
+    uiNotificationService,
+  } = servicesManager.services;
 
   measurementService.clearMeasurements();
 
@@ -216,17 +221,16 @@ export function onModeExit({ servicesManager }: withAppTypes) {
 
 export const toolbarSections = {
   [TOOLBAR_SECTIONS.primary]: [
-    'MeasurementTools',
-    'Zoom',
-    'Pan',
-    'TrackballRotate',
     'WindowLevel',
-    'Capture',
-    'Layout',
+    'Pan',
+    'Zoom',
+    'StackScroll',
+    'MeasurementTools',
     'Crosshairs',
+    'invert',
+    'Reset',
     'MoreTools',
-    'Share',
-    'Fullscreen',
+    'Layout',
   ],
 
   [TOOLBAR_SECTIONS.viewportActionMenu.topLeft]: ['orientationMenu', 'dataOverlayMenu'],

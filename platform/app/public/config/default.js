@@ -11,7 +11,10 @@ window.config = {
   extensions: [],
   modes: [],
   customizationService: {},
-  showStudyList: true,
+  investigationalUseDialog: {
+    option: 'never',
+  },
+  showStudyList: false,
   // some windows systems have issues with more than 3 web workers
   maxNumberOfWebWorkers: 3,
   // below flag is for performance reasons, but it might not work for all servers
@@ -261,21 +264,36 @@ window.config = {
   //     background: 'rgba(100, 100, 100, 0.5)', // can be any valid css color
   //   },
   // },
-  // whiteLabeling: {
-  //   createLogoComponentFn: function (React) {
-  //     return React.createElement(
-  //       'a',
-  //       {
-  //         target: '_self',
-  //         rel: 'noopener noreferrer',
-  //         className: 'text-purple-600 line-through',
-  //         href: '_X___IDC__LOGO__LINK___Y_',
-  //       },
-  //       React.createElement('img', {
-  //         src: './Logo.svg',
-  //         className: 'w-14 h-14',
-  //       })
-  //     );
-  //   },
-  // },
+  whiteLabeling: {
+    createLogoComponentFn: function (React) {
+      return React.createElement(
+        'div',
+        { className: 'flex items-center space-x-2 cursor-pointer' },
+        [
+          React.createElement(
+            'svg',
+            { 
+              xmlns: 'http://www.w3.org/2000/svg', 
+              viewBox: '0 0 100 100', 
+              className: 'w-9 h-9', 
+              key: 'logo-svg' 
+            },
+            [
+              React.createElement('rect', { x: '15', y: '40', width: '10', height: '20', rx: '5', fill: '#5ACCE6', opacity: '0.6', key: 'r1' }),
+              React.createElement('rect', { x: '35', y: '25', width: '10', height: '50', rx: '5', fill: '#0D6EFD', opacity: '0.8', key: 'r2' }),
+              React.createElement('rect', { x: '55', y: '10', width: '10', height: '80', rx: '5', fill: '#FFFFFF', key: 'r3' }),
+              React.createElement('rect', { x: '75', y: '30', width: '10', height: '40', rx: '5', fill: '#5ACCE6', key: 'r4' })
+            ]
+          ),
+          React.createElement(
+            'div',
+            { className: 'flex flex-col justify-center ml-2', key: 'logo-text' },
+            [
+              React.createElement('span', { className: 'text-[20px] font-bold text-white leading-none tracking-widest', key: 't1' }, 'SPECTRA')
+            ]
+          )
+        ]
+      );
+    },
+  },
 };

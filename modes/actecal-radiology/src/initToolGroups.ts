@@ -237,6 +237,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
       },
     ],
     disabled: [
+      /*
       {
         toolName: toolNames.Crosshairs,
         bindings: [
@@ -269,6 +270,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
           },
         },
       },
+      */
       {
         toolName: toolNames.AdvancedMagnify,
       },

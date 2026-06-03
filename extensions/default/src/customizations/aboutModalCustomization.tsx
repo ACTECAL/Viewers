@@ -14,7 +14,7 @@ function AboutModalDefault() {
 
   return (
     <AboutModal className="w-[400px]">
-      <AboutModal.ProductName>OHIF Viewer</AboutModal.ProductName>
+      <AboutModal.ProductName>ACTECAL Spectra</AboutModal.ProductName>
       <AboutModal.ProductVersion>{main}</AboutModal.ProductVersion>
       {beta && <AboutModal.ProductBeta>{beta}</AboutModal.ProductBeta>}
 
@@ -29,8 +29,8 @@ function AboutModalDefault() {
         />
         <AboutModal.SocialItem
           icon="SocialGithub"
-          url="OHIF/Viewers"
-          text="github.com/OHIF/Viewers"
+          url="https://actecal.com"
+          text="actecal.com"
         />
       </AboutModal.Body>
     </AboutModal>

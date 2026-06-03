@@ -17,39 +17,20 @@ const formatWithEllipsis = (str, maxLength) => {
 };
 
 function HeaderPatientInfo({ servicesManager, appConfig }: withAppTypes) {
-  const initialExpandedState =
-    appConfig.showPatientInfo === PatientInfoVisibility.VISIBLE ||
-    appConfig.showPatientInfo === PatientInfoVisibility.VISIBLE_READONLY;
-  const [expanded, setExpanded] = useState(initialExpandedState);
   const { patientInfo, isMixedPatients } = usePatientInfo(servicesManager);
-
-  useEffect(() => {
-    if (isMixedPatients && expanded) {
-      setExpanded(false);
-    }
-  }, [isMixedPatients, expanded]);
-
-  const handleOnClick = () => {
-    if (!isMixedPatients && appConfig.showPatientInfo !== PatientInfoVisibility.VISIBLE_READONLY) {
-      setExpanded(!expanded);
-    }
-  };
 
   const formattedPatientName = formatWithEllipsis(patientInfo.PatientName, 27);
   const formattedPatientID = formatWithEllipsis(patientInfo.PatientID, 15);
 
   return (
-    <div
-      className="hover:bg-muted flex cursor-pointer items-center justify-center gap-1 rounded-lg"
-      onClick={handleOnClick}
-    >
+    <div className="flex items-center justify-center gap-2 rounded-lg px-2">
       {isMixedPatients ? (
-        <Icons.MultiplePatients className="text-primary" />
+        <Icons.MultiplePatients className="text-primary w-5 h-5" />
       ) : (
-        <Icons.Patient className="text-primary" />
+        <Icons.Patient className="text-primary w-5 h-5" />
       )}
       <div className="flex flex-col justify-center">
-        {expanded ? (
+        {!isMixedPatients ? (
           <>
             <div className="text-foreground self-start text-[13px] font-bold">
               {formattedPatientName}
@@ -61,12 +42,11 @@ function HeaderPatientInfo({ servicesManager, appConfig }: withAppTypes) {
             </div>
           </>
         ) : (
-          <div className="text-primary self-center text-[13px]">
-            {isMixedPatients ? 'Multiple Patients' : 'Patient'}
+          <div className="text-foreground self-center text-[13px] font-bold">
+            Multiple Patients
           </div>
         )}
       </div>
-      <Icons.ArrowLeft className={`text-primary ${expanded ? 'rotate-180' : ''}`} />
     </div>
   );
 }

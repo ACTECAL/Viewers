@@ -30,9 +30,9 @@ module.exports = {
 
       primary: {
         light: '#5acce6',
-        main: '#0944b3',
-        dark: '#090c29',
-        active: '#348cfd',
+        main: '#0D6EFD',
+        dark: '#1e1e1e', // Slate dark
+        active: '#0b5ed7',
       },
       inputfield: {
         main: '#3a3f99',
@@ -44,12 +44,12 @@ module.exports = {
       secondary: {
         light: '#3a3f99',
         main: '#2b166b',
-        dark: '#041c4a',
+        dark: '#2a2a2a', // Slate medium
         active: '#1f1f27',
       },
 
       indigo: {
-        dark: '#0b1a42',
+        dark: '#111111', // Very dark slate
       },
 
       common: {

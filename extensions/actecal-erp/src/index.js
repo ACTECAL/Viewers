@@ -286,42 +286,49 @@ async function initializeStudy(extensionManager, servicesManager) {
 ---------------------------- */
 
 try {
-  const { dicomStorePath } = contexts;   // ← yahan [0] lagana zaroori hai
+  const { dicomStorePath } = contexts;
   console.log("dicomStorePath:", dicomStorePath);
 
   const gcpUrl = `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
   console.log("GCP URL:", gcpUrl);
-console.log(
-  "active data source",
-  extensionManager.getActiveDataSource()
-);
+
+  const { userAuthenticationService } = servicesManager.services;
+  
+  // Inject the Google Cloud token into OHIF's authentication service
+  if (userAuthenticationService) {
+    userAuthenticationService.setServiceImplementation({
+      getAuthorizationHeader: () => ({
+        Authorization: `Bearer ${tokenData.access_token}`
+      })
+    });
+    console.log("✅ Set Authorization header in userAuthenticationService");
+  } else {
+    console.warn("userAuthenticationService not available");
+  }
+
   if (extensionManager) {
+    const existingSource = extensionManager.dataSourceDefs["ohif"];
+    const existingConfig = existingSource ? existingSource.configuration : {};
+
     extensionManager.updateDataSourceConfiguration(
-      "ohif",   // ← yeh data source ka naam hai (default usually 'dicomweb' hota hai)
+      "ohif",
       {
+        ...existingConfig,
         wadoUriRoot: gcpUrl,
         qidoRoot: gcpUrl,
         wadoRoot: gcpUrl,
-        headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
-        },
-        // Agar aur options chahiye toh add kar sakte ho
-        // name: 'GCP-Actecal',
-        // enableStudyLazyLoad: true,
+        imageRendering: 'wadors',
+        thumbnailRendering: 'wadors',
+        enableStudyLazyLoad: true,
+        supportsFuzzyMatching: false,
+        supportsWildcard: true,
+        dicomUploadEnabled: true,
+        omitQuotationForMultipartRequest: true,
       }
     );
 
     console.log("✅ Datasource updated successfully using extensionManager");
-  } else {
-    console.warn("ExtensionManager not available");
   }
-
-  const ds = extensionManager.getActiveDataSource();
-
-console.log(
-  "CONFIG AFTER UPDATE",
-  ds?.[0]?.getConfig?.()
-);
 
 } catch (error) {
   console.error("Datasource configuration failed:", error);
@@ -465,7 +472,7 @@ console.log(
 ---------------------------- */
 
 // function preRegistration(extensionManager) {
-function preRegistration({  extensionManager,
+async function preRegistration({  extensionManager,
   servicesManager,
   commandsManager,}) {
 
@@ -479,7 +486,7 @@ function preRegistration({  extensionManager,
   // Initialize viewer
   // initializeStudy(extensionManager);
 
-    initializeStudy(extensionManager, servicesManager);
+  await initializeStudy(extensionManager, servicesManager);
 
 
 
@@ -490,7 +497,7 @@ function preRegistration({  extensionManager,
 
   measurementService
     .subscribe(
-      'MEASUREMENT_ADDED',
+      measurementService.EVENTS.MEASUREMENT_ADDED,
       event => {
 
         console.log(

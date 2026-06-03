@@ -167,13 +167,18 @@ function ViewerLayout({
             {/* LEFT SIDEPANELS */}
             {hasLeftPanels ? (
               <>
-                <ResizablePanel {...resizableLeftPanelProps}>
+                <ResizablePanel {...resizableLeftPanelProps} className="relative">
                   <SidePanelWithServices
                     side="left"
                     isExpanded={!leftPanelClosedState}
                     servicesManager={servicesManager}
                     {...leftPanelProps}
                   />
+                  {!leftPanelClosedState && (
+                    <div className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-50">
+                      <span className="text-[9px] text-[#5ACCE6] opacity-50 font-medium tracking-widest uppercase">Powered by Actecal</span>
+                    </div>
+                  )}
                 </ResizablePanel>
                 <ResizableHandle
                   onDragging={onHandleDragging}
