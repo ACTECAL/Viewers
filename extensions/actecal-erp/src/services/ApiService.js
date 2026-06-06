@@ -10,14 +10,23 @@ class ApiService {
   }
 
 
-  async getGCPToken(studyInstanceUids) {
+  getHeaders(additionalHeaders = {}) {
+    const headers = { ...additionalHeaders };
+    if (this.userId) {
+      headers['x-user-id'] = this.userId;
+    }
+    const guestToken = sessionStorage.getItem('actecal_guestToken');
+    if (guestToken) {
+      headers['Authorization'] = `Bearer ${guestToken}`;
+    }
+    return headers;
+  }
 
+  async getGCPToken(studyInstanceUids) {
     const uids = Array.isArray(studyInstanceUids) ? studyInstanceUids.join(',') : studyInstanceUids;
     const response = await fetch(`${this.baseUrl}/gcp-token?uids=${uids}`, {
       credentials: 'include',
-        headers: {
-          "x-user-id": this.userId,
-        },
+      headers: this.getHeaders(),
     });
     return response.json();
   }
@@ -26,6 +35,7 @@ async fetchStudyContext(studyInstanceUids) {
     const uids = Array.isArray(studyInstanceUids) ? studyInstanceUids.join(',') : studyInstanceUids;
     const response = await fetch(`${this.baseUrl}/studies/context?uids=${uids}`, {
       credentials: 'include',
+      headers: this.getHeaders(),
     });
     return response.json();
   }
@@ -33,6 +43,7 @@ async fetchStudyContext(studyInstanceUids) {
   async fetchMeasurements(studyInstanceUid) {
     const response = await fetch(`${this.baseUrl}/studies/${studyInstanceUid}/measurements`, {
       credentials: 'include',
+      headers: this.getHeaders(),
     });
     return response.json();
   }
@@ -41,9 +52,9 @@ async fetchStudyContext(studyInstanceUids) {
     const response = await fetch(`${this.baseUrl}/studies/${studyInstanceUid}/measurements`, {
       method: 'POST',
       credentials: 'include',
-      headers: {
+      headers: this.getHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(measurementData),
     });
     return response.json();
@@ -52,9 +63,7 @@ async fetchStudyContext(studyInstanceUids) {
   async fetchDraftReport(studyInstanceUid) {
     const response = await fetch(`${this.baseUrl}/get-draft-report?studyInstanceUid=${studyInstanceUid}`, {
       credentials: 'include',
-      headers: {
-        "x-user-id": this.userId,
-      },
+      headers: this.getHeaders(),
     });
     if (!response.ok) {
       throw new Error('Failed to fetch draft report');
@@ -66,6 +75,7 @@ async fetchStudyContext(studyInstanceUids) {
     const response = await fetch(`${this.baseUrl}/measurements/${annotationUID}`, {
       method: 'DELETE',
       credentials: 'include',
+      headers: this.getHeaders(),
     });
     return response.json();
   }
@@ -83,6 +93,7 @@ async fetchStudyContext(studyInstanceUids) {
   async getDoctors() {
     const response = await fetch(`${this.baseUrl}/doctors`, {
       credentials: 'include',
+      headers: this.getHeaders(),
     });
     return response.json();
   }
@@ -91,9 +102,9 @@ async fetchStudyContext(studyInstanceUids) {
     const response = await fetch(`${this.baseUrl}/share`, {
       method: 'POST',
       credentials: 'include',
-      headers: {
+      headers: this.getHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(data),
     });
     return response.json();
@@ -101,6 +112,7 @@ async fetchStudyContext(studyInstanceUids) {
   async resolveShare(shareCode) {
     const response = await fetch(`${this.baseUrl}/resolve-share?code=${shareCode}`, {
       credentials: 'include',
+      headers: this.getHeaders(),
     });
     return response.json();
   }

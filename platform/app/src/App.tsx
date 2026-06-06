@@ -27,6 +27,7 @@ import {
   ModalProvider,
   ViewportDialogProvider,
   UserAuthenticationProvider,
+  LoadingIndicatorProgress,
 } from '@ohif/ui-next';
 // Viewer Project
 // TODO: Should this influence study list?
@@ -71,6 +72,18 @@ function App({
 }) {
   const [init, setInit] = useState(null);
   useEffect(() => {
+    // Extract custom Actecal auth parameters from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get('userid') || urlParams.get('userId');
+    const guestToken = urlParams.get('guestToken');
+    
+    if (userId) {
+      localStorage.setItem('actecal_userId', userId);
+    }
+    if (guestToken) {
+      sessionStorage.setItem('actecal_guestToken', guestToken);
+    }
+
     const run = async () => {
       appInit(config, defaultExtensions, defaultModes).then(setInit).catch(console.error);
     };
@@ -79,7 +92,11 @@ function App({
   }, []);
 
   if (!init) {
-    return null;
+    return (
+      <div className="bg-background h-screen w-screen absolute top-0 left-0">
+        <LoadingIndicatorProgress className="h-full w-full" />
+      </div>
+    );
   }
 
   // Set above for named export

@@ -253,26 +253,47 @@ async function initializeStudy(extensionManager, servicesManager) {
         return;
       }
 
-      try {
-        const results = await Promise.all([
-          apiService.fetchStudyContext(studyInstanceUids),
-          apiService.getGCPToken(studyInstanceUids),
-        ]);
-        contexts = results[0];
-        tokenData = results[1];
-        
-        if (!tokenData || !tokenData.access_token) {
-          throw new Error("Invalid token received from backend");
+      // Check for cached token from Worklist
+      const cacheKey = `actecal_cache_${studyInstanceUids[0]}`;
+      const cachedData = sessionStorage.getItem(cacheKey);
+
+      if (cachedData) {
+        try {
+          const parsedCache = JSON.parse(cachedData);
+          if (parsedCache.token && parsedCache.dicomStorePath) {
+            console.log("🚀 Cache Hit! Bypassing API fetch for StudyContext & Token");
+            contexts = { studies: [{ dicom_store_path: parsedCache.dicomStorePath, study_instance_uid: studyInstanceUids[0] }] };
+            tokenData = { access_token: parsedCache.token };
+          }
+        } catch (e) {
+          console.warn("Error parsing cached Worklist data", e);
         }
-      } catch (authErr) {
-        uiNotificationService.show({
-          title: 'Authentication Error',
-          message: 'Failed to retrieve access token or study context for the data source.',
-          type: 'error',
-          duration: 10000,
-        });
-        console.error("Token fetch failed:", authErr);
-        return;
+      }
+
+      // Fallback to API if cache missed
+      if (!contexts || !tokenData) {
+        try {
+          console.log("Cache Miss. Fetching Context and Token via API");
+          const results = await Promise.all([
+            apiService.fetchStudyContext(studyInstanceUids),
+            apiService.getGCPToken(studyInstanceUids),
+          ]);
+          contexts = results[0];
+          tokenData = results[1];
+          
+          if (!tokenData || !tokenData.access_token) {
+            throw new Error("Invalid token received from backend");
+          }
+        } catch (authErr) {
+          uiNotificationService.show({
+            title: 'Authentication Error',
+            message: 'Failed to retrieve access token or study context for the data source.',
+            type: 'error',
+            duration: 10000,
+          });
+          console.error("Token fetch failed:", authErr);
+          return;
+        }
       }
     }
 
@@ -286,7 +307,59 @@ async function initializeStudy(extensionManager, servicesManager) {
 ---------------------------- */
 
 try {
-  const { dicomStorePath } = contexts;
+  let dicomStorePath;
+  let validUids = [...studyInstanceUids];
+
+  if (contexts && contexts.studies && Array.isArray(contexts.studies) && contexts.studies.length > 0) {
+    // Extract primary datastore from the first study
+    dicomStorePath = contexts.studies[0].dicom_store_path;
+
+    // Check if any studies belong to a different datastore
+    const mismatchedStudies = contexts.studies.filter(s => s.dicom_store_path !== dicomStorePath);
+
+    if (mismatchedStudies.length > 0) {
+      const mismatchedUids = mismatchedStudies.map(s => s.study_instance_uid);
+      const matchedStudies = contexts.studies.filter(s => s.dicom_store_path === dicomStorePath);
+      validUids = matchedStudies.map(s => s.study_instance_uid);
+
+      // Update the browser URL immediately so OHIF core only loads the valid UIDs
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('StudyInstanceUIDs')) {
+        urlParams.set('StudyInstanceUIDs', validUids.join(','));
+      }
+      if (urlParams.has('StudyInstanceUID')) {
+        urlParams.delete('StudyInstanceUID'); // Clean up singular param if we are using multiples
+        urlParams.set('StudyInstanceUIDs', validUids.join(','));
+      }
+      const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+      window.history.replaceState(null, '', newUrl);
+
+      // Generate a URL for the remaining mismatched studies
+      const newTabParams = new URLSearchParams(window.location.search);
+      newTabParams.delete('StudyInstanceUID');
+      newTabParams.set('StudyInstanceUIDs', mismatchedUids.join(','));
+      const newTabUrl = `${window.location.pathname}?${newTabParams.toString()}`;
+
+      // Show toast notifying user
+      const { uiNotificationService } = servicesManager.services;
+      uiNotificationService.show({
+        title: 'Additional Studies Available',
+        message: `Requested study cannot be opened in same view. Please click below to open in another tab.`,
+        type: 'warning',
+        duration: 15000,
+        action: {
+          label: 'Open Remaining in New Tab',
+          onClick: () => {
+            window.open(newTabUrl, '_blank');
+          }
+        }
+      });
+    }
+  } else {
+    // Fallback to older API response format if the backend hasn't updated yet
+    dicomStorePath = contexts.dicomStorePath;
+  }
+
   console.log("dicomStorePath:", dicomStorePath);
 
   const gcpUrl = `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
@@ -505,6 +578,15 @@ async function preRegistration({  extensionManager,
           event
         );
 
+  measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_UPDATED, event => {
+    console.log("MEASUREMENT_UPDATED:", event);
+    const measurement = event?.measurement;
+    if (measurement?.studyInstanceUid) {
+      apiService.saveMeasurement(measurement.studyInstanceUid, measurement);
+    }
+  });
+
+
         const measurement =
           event
             ?.measurement;
@@ -647,6 +729,11 @@ function getToolbarModule({ commandsManager }) {
 
 import ReportingPanel from './components/ReportingPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
+import ActiveUsersPanel from './components/ActiveUsersPanel';
+import CollaborativeNotesPanel from './components/CollaborativeNotesPanel';
+import AnnotationFiltersPanel from './components/AnnotationFiltersPanel';
+
+
 
 function getPanelModule({ commandsManager, extensionManager, servicesManager }) {
   return [
@@ -664,8 +751,31 @@ function getPanelModule({ commandsManager, extensionManager, servicesManager }) 
       label: 'AI Analysis',
       component: AIAnalysisPanel,
     },
+    {
+      name: 'activeUsers',
+      iconName: 'group',
+      iconLabel: 'Active Users',
+      label: 'Active Participants',
+      component: ActiveUsersPanel,
+    },
+    {
+      name: 'notes',
+      iconName: 'chat',
+      iconLabel: 'Notes',
+      label: 'Collaborative Notes',
+      component: CollaborativeNotesPanel,
+    },
+    {
+      name: 'annotationFilters',
+      iconName: 'list',
+      iconLabel: 'Filters',
+      label: 'Annotation Visibility',
+      component: AnnotationFiltersPanel,
+    },
   ];
 }
+
+import getDataSourcesModule from './getDataSourcesModule';
 
 /* ---------------------------
    EXPORT
@@ -679,5 +789,6 @@ export default {
   preRegistration,
   getCommandsModule,
   getToolbarModule,
-  getPanelModule
+  getPanelModule,
+  getDataSourcesModule
 };

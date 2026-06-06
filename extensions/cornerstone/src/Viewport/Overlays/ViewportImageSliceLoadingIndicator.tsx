@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import PropTypes from 'prop-types';
 import { Enums } from '@cornerstonejs/core';
 
-function ViewportImageSliceLoadingIndicator({ viewportData, element }) {
+function ViewportImageSliceLoadingIndicator({ viewportData, element, servicesManager }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -46,21 +46,17 @@ function ViewportImageSliceLoadingIndicator({ viewportData, element }) {
     };
   }, [element, viewportData]);
 
-  if (error) {
-    return (
-      <>
-        <div className="absolute top-0 left-0 h-full w-full bg-black opacity-50">
-          <div className="transparent flex h-full w-full items-center justify-center">
-            <p className="text-highlight text-xl font-light">
-              <h4>Error Loading Image</h4>
-              <p>An error has occurred.</p>
-              <p>{error}</p>
-            </p>
-          </div>
-        </div>
-      </>
-    );
-  }
+  useEffect(() => {
+    if (error && servicesManager) {
+      const errorMsg = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Failed to load image slice';
+      servicesManager.services.uiNotificationService.show({
+        title: 'Backend Communication Error',
+        message: `Failed to load image data: ${errorMsg}`,
+        type: 'error',
+        duration: 5000,
+      });
+    }
+  }, [error, servicesManager]);
 
   if (loading) {
     return (
@@ -80,6 +76,7 @@ function ViewportImageSliceLoadingIndicator({ viewportData, element }) {
 ViewportImageSliceLoadingIndicator.propTypes = {
   error: PropTypes.object,
   element: PropTypes.object,
+  servicesManager: PropTypes.object,
 };
 
 export default ViewportImageSliceLoadingIndicator;

@@ -15,7 +15,7 @@ function usePatientInfo() {
   });
   const [isMixedPatients, setIsMixedPatients] = useState(false);
 
-  const checkMixedPatients = (PatientID: string) => {
+  const checkMixedPatients = (referenceInstance) => {
     const displaySets = displaySetService.getActiveDisplaySets();
     let isMixedPatients = false;
     displaySets.forEach(displaySet => {
@@ -23,7 +23,15 @@ function usePatientInfo() {
       if (!instance) {
         return;
       }
-      if (instance.PatientID !== PatientID) {
+      
+      const isSameID = instance.PatientID === referenceInstance.PatientID;
+      const isSameNameAndDOB = 
+        instance.PatientName && referenceInstance.PatientName &&
+        formatPN(instance.PatientName) === formatPN(referenceInstance.PatientName) && 
+        instance.PatientBirthDate === referenceInstance.PatientBirthDate;
+
+      // They are only mixed if NEITHER the ID nor the Name+DOB match
+      if (!isSameID && !isSameNameAndDOB) {
         isMixedPatients = true;
       }
     });
@@ -46,7 +54,7 @@ function usePatientInfo() {
       PatientSex: instance.PatientSex || null,
       PatientDOB: formatDate(instance.PatientBirthDate) || null,
     });
-    checkMixedPatients(instance.PatientID || null);
+    checkMixedPatients(instance);
   };
 
   useEffect(() => {

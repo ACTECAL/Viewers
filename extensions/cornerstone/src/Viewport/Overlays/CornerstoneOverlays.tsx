@@ -81,6 +81,7 @@ function CornerstoneOverlays(props: withAppTypes) {
       <ViewportImageSliceLoadingIndicator
         viewportData={viewportData}
         element={element}
+        servicesManager={servicesManager}
       />
 
       <ViewportOrientationMarkers

@@ -14,7 +14,7 @@ window.config = {
   investigationalUseDialog: {
     option: 'never',
   },
-  showStudyList: false,
+  showStudyList: true,
   // some windows systems have issues with more than 3 web workers
   maxNumberOfWebWorkers: 3,
   // below flag is for performance reasons, but it might not work for all servers
@@ -103,7 +103,7 @@ window.config = {
       ],
     },
   ],
-  defaultDataSourceName: 'ohif',
+  defaultDataSourceName: 'actecalApi',
   /* Dynamic config allows user to pass "configUrl" query string this allows to load config without recompiling application. The regex will ensure valid configuration source */
   // dangerouslyUseDynamicConfig: {
   //   enabled: true,
@@ -115,6 +115,14 @@ window.config = {
   //   regex: /.*/,
   // },
   dataSources: [
+    {
+      namespace: 'actecal-erp.dataSourcesModule.actecalApi',
+      sourceName: 'actecalApi',
+      configuration: {
+        friendlyName: 'Actecal ERP Worklist API',
+        name: 'actecal',
+      },
+    },
     {
       namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
       sourceName: 'ohif',

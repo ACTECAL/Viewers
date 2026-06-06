@@ -6,7 +6,7 @@ import { HangingProtocolService, CommandsManager } from '@ohif/core';
 import { useAppConfig } from '@state';
 import ViewerHeader from './ViewerHeader';
 import SidePanelWithServices from '../Components/SidePanelWithServices';
-import { Onboarding, ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@ohif/ui-next';
+import { Onboarding, ResizablePanelGroup, ResizablePanel, ResizableHandle, Button, Icons } from '@ohif/ui-next';
 import useResizablePanels from './ResizablePanelsHook';
 
 const resizableHandleClassName = 'mt-[1px] bg-background';
@@ -31,7 +31,7 @@ function ViewerLayout({
 }: withAppTypes): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
-  const { panelService, hangingProtocolService, customizationService } = servicesManager.services;
+  const { panelService, hangingProtocolService, customizationService, uiNotificationService } = servicesManager.services;
   const [showLoadingIndicator, setShowLoadingIndicator] = useState(appConfig.showLoadingIndicator);
 
   const hasPanels = useCallback(
@@ -43,6 +43,56 @@ function ViewerLayout({
   const [hasLeftPanels, setHasLeftPanels] = useState(hasPanels('left'));
   const [leftPanelClosedState, setLeftPanelClosed] = useState(leftPanelClosed);
   const [rightPanelClosedState, setRightPanelClosed] = useState(rightPanelClosed);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFS = !!document.fullscreenElement;
+      setIsFullscreen(isFS);
+      if (!isFS) {
+        // Automatically restore panels when exiting fullscreen (e.g., via ESC key)
+        setLeftPanelClosed(false);
+        setRightPanelClosed(false);
+      }
+    };
+    
+    const handleKeyDown = (e) => {
+      // Toggle fullscreen on 'f' or 'F' if not focusing an input
+      if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        const isFS = !!document.fullscreenElement;
+        const panelsClosed = leftPanelClosedState && rightPanelClosedState;
+
+        if (!isFS) {
+          // State 0 -> State 1: Enter FS, hide panels
+          document.documentElement.requestFullscreen().catch((err) => {
+            console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
+          });
+          setLeftPanelClosed(true);
+          setRightPanelClosed(true);
+        } else if (isFS && panelsClosed) {
+          // State 1 -> State 2: Stay FS, show panels
+          setLeftPanelClosed(false);
+          setRightPanelClosed(false);
+        } else {
+          // State 2 -> State 0: Exit FS, show panels
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          }
+          setLeftPanelClosed(false);
+          setRightPanelClosed(false);
+        }
+      }
+    };
+    
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [leftPanelClosedState, rightPanelClosedState]);
 
   const [
     leftPanelProps,
@@ -149,17 +199,81 @@ function ViewerLayout({
 
   const viewportComponents = viewports.map(getViewportComponentData);
 
+  const isZenMode = isFullscreen && leftPanelClosedState && rightPanelClosedState;
+
+  const handleSubmitReport = async () => {
+    try {
+      const studyInstanceUID = viewports[0]?.displaySetsToDisplay?.[0]?.StudyInstanceUID;
+      const response = await fetch(`${appConfig.apiBaseUrl}/erp/autolight/dicom/worklist/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ StudyInstanceUID: studyInstanceUID, status: 'REPORTED' })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (window.opener) {
+        window.close();
+      } else {
+        window.location.href = '/';
+      }
+    } catch (err) {
+      console.error('Failed to submit report', err);
+      uiNotificationService.show({
+        title: 'Submit Failed',
+        message: 'Report not submitted',
+        type: 'error',
+      });
+    }
+  };
+
+  const renderSubmitButton = () => (
+    <div className="absolute bottom-10 left-0 right-0 flex justify-center z-50">
+      <Button 
+        className="bg-[#5b65d6] hover:bg-[#4a54c4] text-white shadow-lg flex items-center gap-2"
+        onClick={handleSubmitReport}
+      >
+        <Icons.Checked className="w-4 h-4" />
+        Submit Report
+      </Button>
+    </div>
+  );
+
+  const showSubmitInRight = hasRightPanels && !rightPanelClosedState;
+  const showSubmitInLeft = !showSubmitInRight && hasLeftPanels && !leftPanelClosedState;
+
   return (
     <div>
-      <ViewerHeader
-        hotkeysManager={hotkeysManager}
-        extensionManager={extensionManager}
-        servicesManager={servicesManager}
-        appConfig={appConfig}
-      />
+      {!isZenMode && (
+        <ViewerHeader
+          hotkeysManager={hotkeysManager}
+          extensionManager={extensionManager}
+          servicesManager={servicesManager}
+          appConfig={appConfig}
+        />
+      )}
+      {isZenMode && (
+        <div
+          className="absolute top-0 left-0 w-full z-50 transition-transform duration-300 ease-in-out"
+          style={{ transform: isHeaderHovered ? 'translateY(0)' : 'translateY(calc(-100% + 12px))', opacity: isHeaderHovered ? 1 : 0 }}
+          onMouseEnter={() => setIsHeaderHovered(true)}
+          onMouseLeave={() => setIsHeaderHovered(false)}
+        >
+          {/* Invisible trigger zone at the very bottom so it remains easy to hover when hidden */}
+          {!isHeaderHovered && <div className="absolute bottom-0 w-full h-[12px] cursor-pointer" />}
+          <ViewerHeader
+            hotkeysManager={hotkeysManager}
+            extensionManager={extensionManager}
+            servicesManager={servicesManager}
+            appConfig={appConfig}
+          />
+        </div>
+      )}
       <div
         className="relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden bg-background"
-        style={{ height: 'calc(100vh - 52px' }}
+        style={{ height: isZenMode ? '100vh' : 'calc(100vh - 52px)' }}
       >
         <React.Fragment>
           {showLoadingIndicator && <LoadingIndicatorProgress className="h-full w-full bg-background" />}
@@ -174,6 +288,7 @@ function ViewerLayout({
                     servicesManager={servicesManager}
                     {...leftPanelProps}
                   />
+                  {showSubmitInLeft && renderSubmitButton()}
                   {!leftPanelClosedState && (
                     <div className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-50">
                       <span className="text-[9px] text-[#5ACCE6] opacity-50 font-medium tracking-widest uppercase">Powered by Actecal</span>
@@ -209,13 +324,14 @@ function ViewerLayout({
                   disabled={!rightPanelResizable}
                   className={resizableHandleClassName}
                 />
-                <ResizablePanel {...resizableRightPanelProps}>
+                <ResizablePanel {...resizableRightPanelProps} className="relative">
                   <SidePanelWithServices
                     side="right"
                     isExpanded={!rightPanelClosedState}
                     servicesManager={servicesManager}
                     {...rightPanelProps}
                   />
+                  {showSubmitInRight && renderSubmitButton()}
                 </ResizablePanel>
               </>
             ) : null}

@@ -221,6 +221,8 @@ export const toolbarSections = {
     'StackScroll',
     'MeasurementTools',
     'Crosshairs',
+    'MPR',
+    'TrackballRotate',
     'invert',
     'Reset',
     'MoreTools',
@@ -260,7 +262,6 @@ export const toolbarSections = {
   ],
 
   MoreTools: [
-    'Reset',
     'rotate-right',
     'flipHorizontal',
     'ImageSliceSync',

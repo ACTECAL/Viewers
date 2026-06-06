@@ -20,12 +20,12 @@ const TIPS = [
 ];
 
 function ShortcutToast({ onClose, onShowPreferences }) {
-  const [tipIndex, setTipIndex] = useState(0);
+  const [tipIndex, setTipIndex] = useState(() => Math.floor(Math.random() * TIPS.length));
 
   return ReactDOM.createPortal(
     <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999 }} className="bg-[#161c2d] text-white p-4 rounded-lg shadow-lg max-w-sm border border-[#3a3f99] flex flex-col gap-3">
       <div className="flex justify-between items-center mb-1">
-        <h3 className="font-bold text-lg text-[#5b65d6]">ACTECAL Shortcuts</h3>
+        <h3 className="font-bold text-lg text-[#5b65d6]">Do you know?</h3>
         <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
           <Icons.ByName name="close" className="w-4 h-4" />
         </button>

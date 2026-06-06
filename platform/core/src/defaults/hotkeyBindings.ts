@@ -57,6 +57,12 @@ const bindings = [
     isEditable: true,
   },
   {
+    commandName: 'toggleFullscreen',
+    label: 'Fullscreen',
+    keys: ['f'],
+    isEditable: true,
+  },
+  {
     commandName: 'flipViewportVertical',
     label: 'Flip Vertically',
     keys: ['v'],
