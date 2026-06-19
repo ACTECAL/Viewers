@@ -56,10 +56,11 @@ function ViewerLayout({
         setRightPanelClosed(false);
       }
     };
-    
+
     const handleKeyDown = (e) => {
-      // Toggle fullscreen on 'f' or 'F' if not focusing an input
-      if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+      console.log('Key pressed:', e.key, 'Target:', e.target.tagName, 'ContentEditable:', e.target.isContentEditable);
+      // Toggle fullscreen on 'f' or 'F' if not focusing an input or contenteditable element
+      if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
         e.preventDefault();
         const isFS = !!document.fullscreenElement;
         const panelsClosed = leftPanelClosedState && rightPanelClosedState;
@@ -85,7 +86,7 @@ function ViewerLayout({
         }
       }
     };
-    
+
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
     return () => {
@@ -177,6 +178,8 @@ function ViewerLayout({
     };
   };
 
+  const [activeRightPanelId, setActiveRightPanelId] = useState<string | null>(null);
+
   useEffect(() => {
     const { unsubscribe } = panelService.subscribe(
       panelService.EVENTS.PANELS_CHANGED,
@@ -192,8 +195,16 @@ function ViewerLayout({
       }
     );
 
+    const handleTabChange = (e: any) => {
+      if (e.detail.side === 'right') {
+        setActiveRightPanelId(e.detail.panelId);
+      }
+    };
+    window.addEventListener('panel-tab-changed', handleTabChange);
+
     return () => {
       unsubscribe();
+      window.removeEventListener('panel-tab-changed', handleTabChange);
     };
   }, [panelService, hasPanels]);
 
@@ -201,7 +212,7 @@ function ViewerLayout({
 
   const isZenMode = isFullscreen && leftPanelClosedState && rightPanelClosedState;
 
-  const handleSubmitReport = async () => {
+  const handleSubmitReport = useCallback(async () => {
     try {
       const studyInstanceUID = viewports[0]?.displaySetsToDisplay?.[0]?.StudyInstanceUID;
       const response = await fetch(`${appConfig.apiBaseUrl}/erp/autolight/dicom/worklist/submit`, {
@@ -227,22 +238,40 @@ function ViewerLayout({
         type: 'error',
       });
     }
-  };
+  }, [viewports, appConfig, uiNotificationService]);
 
-  const renderSubmitButton = () => (
-    <div className="absolute bottom-10 left-0 right-0 flex justify-center z-50">
-      <Button 
-        className="bg-[#5b65d6] hover:bg-[#4a54c4] text-white shadow-lg flex items-center gap-2"
-        onClick={handleSubmitReport}
-      >
-        <Icons.Checked className="w-4 h-4" />
-        Submit Report
-      </Button>
-    </div>
-  );
+  useEffect(() => {
+    const handleTrigger = () => handleSubmitReport();
+    window.addEventListener('trigger-submit-report', handleTrigger);
+    return () => window.removeEventListener('trigger-submit-report', handleTrigger);
+  }, [handleSubmitReport]);
 
-  const showSubmitInRight = hasRightPanels && !rightPanelClosedState;
-  const showSubmitInLeft = !showSubmitInRight && hasLeftPanels && !leftPanelClosedState;
+  useEffect(() => {
+    const handleRelogin = () => {
+      const { uiDialogService } = servicesManager.services;
+      const ReloginDialogContent = ({ hide }: { hide?: () => void }) => (
+        <div className="flex flex-col gap-4">
+          <p className="text-gray-300">Your session has expired or is unauthenticated. Please login again to continue.</p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button onClick={() => {
+               hide?.();
+               window.location.reload();
+            }} className="bg-[#5b65d6] hover:bg-[#4a54c4] text-white">
+              Login
+            </Button>
+          </div>
+        </div>
+      );
+
+      uiDialogService.show({
+        content: ReloginDialogContent,
+        title: 'Session Expired',
+      });
+    };
+
+    window.addEventListener('trigger-relogin', handleRelogin);
+    return () => window.removeEventListener('trigger-relogin', handleRelogin);
+  }, [servicesManager]);
 
   return (
     <div>
@@ -288,7 +317,6 @@ function ViewerLayout({
                     servicesManager={servicesManager}
                     {...leftPanelProps}
                   />
-                  {showSubmitInLeft && renderSubmitButton()}
                   {!leftPanelClosedState && (
                     <div className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-50">
                       <span className="text-[9px] text-[#5ACCE6] opacity-50 font-medium tracking-widest uppercase">Powered by Actecal</span>
@@ -331,7 +359,6 @@ function ViewerLayout({
                     servicesManager={servicesManager}
                     {...rightPanelProps}
                   />
-                  {showSubmitInRight && renderSubmitButton()}
                 </ResizablePanel>
               </>
             ) : null}

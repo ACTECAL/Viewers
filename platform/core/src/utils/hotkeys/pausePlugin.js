@@ -15,7 +15,25 @@ export default function pausePlugin(Mousetrap) {
       return true;
     }
 
-    return _originalStopCallback.call(self, e, element, combo);
+    var originalResult = _originalStopCallback.call(self, e, element, combo);
+    
+    // CUSTOM DEBUG LOGGING
+    if (e && e.key === 'f') {
+      console.log('Mousetrap stopCallback for f:', {
+        element,
+        tagName: element?.tagName,
+        isContentEditable: element?.isContentEditable,
+        originalResult
+      });
+    }
+
+    // ACTECAL OVERRIDE: If the element is within a contenteditable or has our editor class, stop it!
+    if (element && (element.isContentEditable || (element.closest && element.closest('[contenteditable="true"]')) || (element.closest && element.closest('.editor-input')))) {
+      if (e.key === 'f') console.log('ACTECAL OVERRIDE: Stopping mousetrap for f in editor');
+      return true;
+    }
+
+    return originalResult;
   };
 
   Mousetrap.prototype.pause = function () {

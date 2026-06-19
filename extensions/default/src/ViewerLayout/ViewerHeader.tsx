@@ -66,29 +66,11 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
-    const searchParams = new URLSearchParams(location.search);
-    let autoFullscreenListener: (() => void) | null = null;
-
-    if (searchParams.get('mode') === 'fullscreen') {
-      // Browser strictly blocks requestFullscreen unless triggered by a user gesture.
-      // We will attach a one-time listener to the document to trigger it on their first interaction.
-      autoFullscreenListener = () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch((err) => {
-            console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
-          });
-        }
-        document.removeEventListener('click', autoFullscreenListener as EventListener);
-      };
-      
-      document.addEventListener('click', autoFullscreenListener);
-    }
+    // The auto-fullscreen on first click has been disabled as requested by the user.
+    // If they want fullscreen, they can click the manual toggle button.
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      if (autoFullscreenListener) {
-        document.removeEventListener('click', autoFullscreenListener);
-      }
     };
   }, [location.search]);
 

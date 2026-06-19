@@ -43,8 +43,11 @@ const SidePanelWithServices = ({
       toolbarService.refreshToolbarState({ viewportId });
 
       setActiveTabIndex(activeTabIndex);
+      
+      const activeTabId = tabs[activeTabIndex]?.id;
+      window.dispatchEvent(new CustomEvent('panel-tab-changed', { detail: { side, panelId: activeTabId } }));
     },
-    [toolbarService, viewportGridService]
+    [toolbarService, viewportGridService, side, tabs]
   );
 
   const handleOpen = useCallback(() => {
@@ -66,6 +69,13 @@ const SidePanelWithServices = ({
   useEffect(() => {
     setActiveTabIndex(activeTabIndexProp ?? 0);
   }, [activeTabIndexProp]);
+
+  useEffect(() => {
+    const activeTabId = tabs[activeTabIndex]?.id;
+    if (activeTabId) {
+      window.dispatchEvent(new CustomEvent('panel-tab-changed', { detail: { side, panelId: activeTabId } }));
+    }
+  }, [activeTabIndex, tabs, side]);
 
   useEffect(() => {
     const { unsubscribe } = panelService.subscribe(

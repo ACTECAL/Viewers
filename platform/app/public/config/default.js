@@ -116,7 +116,7 @@ window.config = {
   // },
   dataSources: [
     {
-      namespace: 'actecal-erp.dataSourcesModule.actecalApi',
+      namespace: '@ohif/extension-actecal-erp.dataSourcesModule.actecalApi',
       sourceName: 'actecalApi',
       configuration: {
         friendlyName: 'Actecal ERP Worklist API',
@@ -280,11 +280,11 @@ window.config = {
         [
           React.createElement(
             'svg',
-            { 
-              xmlns: 'http://www.w3.org/2000/svg', 
-              viewBox: '0 0 100 100', 
-              className: 'w-9 h-9', 
-              key: 'logo-svg' 
+            {
+              xmlns: 'http://www.w3.org/2000/svg',
+              viewBox: '0 0 100 100',
+              className: 'w-9 h-9',
+              key: 'logo-svg'
             },
             [
               React.createElement('rect', { x: '15', y: '40', width: '10', height: '20', rx: '5', fill: '#5ACCE6', opacity: '0.6', key: 'r1' }),

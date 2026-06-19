@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import IoTService from '../services/IoTService';
+import { useSystem } from '@ohif/core';
 
-function ActiveUsersPanel({ servicesManager }) {
+function ActiveUsersPanel() {
+  const { servicesManager } = useSystem();
   const [activeUsers, setActiveUsers] = useState([]);
   const [studyUid, setStudyUid] = useState(null);
 

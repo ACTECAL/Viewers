@@ -55,7 +55,7 @@ function DataSourceWrapper(props: withAppTypes) {
     let dataSourceName = lowerCaseSearchParams.get('datasources');
 
     if (!dataSourceName && window.config.defaultDataSourceName) {
-      return '';
+      return window.config.defaultDataSourceName;
     }
 
     if (!dataSourceName) {
@@ -90,6 +90,9 @@ function DataSourceWrapper(props: withAppTypes) {
 
   const [dataSource, setDataSource] = useState(() => {
     const dataSourceName = getInitialDataSourceName();
+    console.log('[DEBUG] getInitialDataSourceName:', dataSourceName);
+    console.log('[DEBUG] ExtensionManager registeredExtensionIds:', extensionManager.registeredExtensionIds);
+    console.log('[DEBUG] ExtensionManager dataSourceMap keys:', Object.keys(extensionManager.dataSourceMap));
 
     if (!dataSourceName) {
       return extensionManager.getActiveDataSource()[0];
@@ -97,6 +100,7 @@ function DataSourceWrapper(props: withAppTypes) {
 
     const dataSource = extensionManager.getDataSources(dataSourceName)?.[0];
     if (!dataSource) {
+      console.error(`[DEBUG] No data source found for ${dataSourceName}. Available:`, Object.keys(extensionManager.dataSourceMap));
       throw new Error(`No data source found for ${dataSourceName}`);
     }
 
@@ -151,11 +155,12 @@ function DataSourceWrapper(props: withAppTypes) {
     async function getData() {
       setIsLoading(true);
       log.time(Enums.TimingEnum.SEARCH_TO_LIST);
-      const studies = await dataSource.query.studies.search(queryFilterValues);
+      const studies = await dataSource.query.studies.search(queryFilterValues).catch(() => []);
+      const studiesArray = studies || [];
 
       setData({
-        studies: studies || [],
-        total: studies.length,
+        studies: studiesArray,
+        total: studiesArray.length,
         resultsPerPage: queryFilterValues.resultsPerPage,
         pageNumber: queryFilterValues.pageNumber,
         location,

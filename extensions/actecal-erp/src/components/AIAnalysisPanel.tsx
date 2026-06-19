@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { useSystem } from '@ohif/core';
 
-function AIAnalysisPanel({ servicesManager, extensionManager }) {
+function AIAnalysisPanel() {
+  const { servicesManager, extensionManager } = useSystem();
   const { viewportGridService } = servicesManager.services;
   const [analysis, setAnalysis] = useState('Running AI Analysis...');
 
@@ -30,14 +31,16 @@ function AIAnalysisPanel({ servicesManager, extensionManager }) {
   }, [viewportGridService]);
 
   return (
-    <div className="flex flex-col h-full bg-primary-dark p-2 text-white">
-      <h3 className="text-lg font-bold mb-2">AI Analysis</h3>
-      <div className="flex-1 w-full bg-secondary-dark text-white p-2 border border-secondary-light rounded overflow-auto whitespace-pre-wrap">
+    <div className="flex flex-col h-full bg-primary-dark p-2 text-white relative">
+      <div className="flex justify-between items-center mb-2">
+        <h3 className="text-lg font-bold">AI Analysis</h3>
+        <button className="bg-primary-main hover:bg-primary-light text-white text-xs font-bold py-1 px-3 rounded">
+          Re-run Analysis
+        </button>
+      </div>
+      <div className="flex-1 w-full bg-secondary-dark text-white p-2 border border-secondary-light rounded overflow-auto whitespace-pre-wrap mb-16">
         {analysis}
       </div>
-      <button className="mt-2 bg-primary-main hover:bg-primary-light text-white font-bold py-2 px-4 rounded">
-        Re-run Analysis
-      </button>
     </div>
   );
 }

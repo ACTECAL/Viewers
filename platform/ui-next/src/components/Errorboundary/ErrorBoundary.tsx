@@ -277,6 +277,12 @@ const ErrorBoundary = ({
     let errorTimeout: NodeJS.Timeout;
 
     const handleError = (event: ErrorEvent) => {
+      const errorMsg = event.error?.message || String(event.error);
+      if (errorMsg.includes('status 401') || event.error?.status === 401) {
+        event.preventDefault();
+        window.dispatchEvent(new Event('trigger-relogin'));
+        return;
+      }
       clearTimeout(errorTimeout);
       errorTimeout = setTimeout(() => {
         setError(event.error);
@@ -286,6 +292,11 @@ const ErrorBoundary = ({
 
     const handleRejection = (event: PromiseRejectionEvent) => {
       event.preventDefault();
+      const reasonMsg = event.reason?.message || String(event.reason);
+      if (reasonMsg.includes('status 401') || event.reason?.status === 401) {
+        window.dispatchEvent(new Event('trigger-relogin'));
+        return;
+      }
       clearTimeout(errorTimeout);
       errorTimeout = setTimeout(() => {
         setError(event.reason || event);

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
+import { useSystem } from '@ohif/core';
 
-function AnnotationFiltersPanel({ servicesManager }) {
+function AnnotationFiltersPanel() {
+  const { servicesManager } = useSystem();
   const [authors, setAuthors] = useState([]);
   const [visibilityMap, setVisibilityMap] = useState({});
 

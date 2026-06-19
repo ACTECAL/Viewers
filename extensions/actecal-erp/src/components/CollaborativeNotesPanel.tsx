@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
+import { useSystem } from '@ohif/core';
 
 const API_BASE_URL = window.config.apiBaseUrl;
 const TENANT = window.config.tenant;
 
-function CollaborativeNotesPanel({ servicesManager }) {
+function CollaborativeNotesPanel() {
+  const { servicesManager } = useSystem();
   const [notes, setNotes] = useState([]);
   const [inputText, setInputText] = useState('');
   const [studyUid, setStudyUid] = useState(null);

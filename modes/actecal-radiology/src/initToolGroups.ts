@@ -20,7 +20,7 @@ function initDefaultToolGroup(extensionManager, toolGroupService, commandsManage
   const tools = {
     active: [
       {
-        toolName: toolNames.StackScroll,
+        toolName: toolNames.WindowLevel,
         bindings: [{ mouseButton: Enums.MouseBindings.Primary }],
       },
       {
@@ -28,11 +28,11 @@ function initDefaultToolGroup(extensionManager, toolGroupService, commandsManage
         bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }],
       },
       {
-        toolName: toolNames.WindowLevel,
+        toolName: toolNames.Zoom,
         bindings: [{ mouseButton: Enums.MouseBindings.Secondary }, { numTouchPoints: 2 }],
       },
       {
-        toolName: toolNames.Zoom,
+        toolName: toolNames.StackScroll,
         bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 3 }],
       },
     ],
@@ -180,7 +180,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
   const tools = {
     active: [
       {
-        toolName: toolNames.StackScroll,
+        toolName: toolNames.WindowLevel,
         bindings: [{ mouseButton: Enums.MouseBindings.Primary }],
       },
       {
@@ -188,11 +188,11 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
         bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }],
       },
       {
-        toolName: toolNames.WindowLevel,
+        toolName: toolNames.Zoom,
         bindings: [{ mouseButton: Enums.MouseBindings.Secondary }, { numTouchPoints: 2 }],
       },
       {
-        toolName: toolNames.Zoom,
+        toolName: toolNames.StackScroll,
         bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 3 }],
       },
     ],

@@ -180,7 +180,7 @@ import {
 
 import { parse } from 'query-string';
 
-const extensionId = 'actecal-erp';
+const extensionId = '@ohif/extension-actecal-erp';
 
 const measurementService =
   new MeasurementService();
@@ -261,9 +261,15 @@ async function initializeStudy(extensionManager, servicesManager) {
         try {
           const parsedCache = JSON.parse(cachedData);
           if (parsedCache.token && parsedCache.dicomStorePath) {
-            console.log("🚀 Cache Hit! Bypassing API fetch for StudyContext & Token");
-            contexts = { studies: [{ dicom_store_path: parsedCache.dicomStorePath, study_instance_uid: studyInstanceUids[0] }] };
-            tokenData = { access_token: parsedCache.token };
+            // Check if token has expired (with a 1-minute safety buffer)
+            if (!parsedCache.expiresAt || Date.now() < parsedCache.expiresAt - 60000) {
+              console.log("🚀 Cache Hit! Bypassing API fetch for StudyContext & Token");
+              contexts = { studies: [{ dicom_store_path: parsedCache.dicomStorePath, study_instance_uid: studyInstanceUids[0] }] };
+              tokenData = { access_token: parsedCache.token };
+            } else {
+              console.log("⚠️ Cached token is expired. Will fetch a new one from API.");
+              sessionStorage.removeItem(cacheKey);
+            }
           }
         } catch (e) {
           console.warn("Error parsing cached Worklist data", e);
@@ -280,7 +286,7 @@ async function initializeStudy(extensionManager, servicesManager) {
           ]);
           contexts = results[0];
           tokenData = results[1];
-          
+
           if (!tokenData || !tokenData.access_token) {
             throw new Error("Invalid token received from backend");
           }
@@ -366,7 +372,7 @@ try {
   console.log("GCP URL:", gcpUrl);
 
   const { userAuthenticationService } = servicesManager.services;
-  
+
   // Inject the Google Cloud token into OHIF's authentication service
   if (userAuthenticationService) {
     userAuthenticationService.setServiceImplementation({
@@ -568,15 +574,13 @@ async function preRegistration({  extensionManager,
      MEASUREMENT EVENTS
   ---------------------------- */
 
-  measurementService
-    .subscribe(
-      measurementService.EVENTS.MEASUREMENT_ADDED,
-      event => {
-
-        console.log(
-          "MEASUREMENT_ADDED:",
-          event
-        );
+  measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_ADDED, event => {
+    console.log("MEASUREMENT_ADDED:", event);
+    const measurement = event?.measurement;
+    if (measurement?.studyInstanceUid) {
+      apiService.saveMeasurement(measurement.studyInstanceUid, measurement);
+    }
+  });
 
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_UPDATED, event => {
     console.log("MEASUREMENT_UPDATED:", event);
@@ -586,60 +590,14 @@ async function preRegistration({  extensionManager,
     }
   });
 
+  measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_REMOVED, event => {
+    console.log("MEASUREMENT_REMOVED:", event);
+    const measurement = event?.measurement;
+    if (measurement?.annotationUID) {
+      apiService.deleteMeasurement(measurement.annotationUID);
+    }
+  });
 
-        const measurement =
-          event
-            ?.measurement;
-
-        if (
-          measurement
-            ?.studyInstanceUid
-        ) {
-
-          apiService
-            .saveMeasurement(
-              measurement
-                .studyInstanceUid,
-
-              measurement
-            );
-
-        }
-
-      }
-    );
-
-
-
-  measurementService
-    .subscribe(
-      'MEASUREMENT_REMOVED',
-      event => {
-
-        console.log(
-          "MEASUREMENT_REMOVED:",
-          event
-        );
-
-        const measurement =
-          event
-            ?.measurement;
-
-        if (
-          measurement
-            ?.annotationUID
-        ) {
-
-          apiService
-            .deleteMeasurement(
-              measurement
-                .annotationUID
-            );
-
-        }
-
-      }
-    );
 
 }
 
@@ -667,25 +625,51 @@ function getCommandsModule({ servicesManager }) {
           containerClassName: 'max-w-lg',
         });
       },
-      toggleFullscreen: () => {
+      toggleFullscreen: (context) => {
+        console.log("===================F key===================");
         const { panelService } = servicesManager.services;
         const isFullscreen = !!document.fullscreenElement;
+
+        // --- ACTECAL DEBUG START ---
+        const activeEl = document.activeElement;
+        const isEditorFocused = activeEl && (
+          activeEl.isContentEditable ||
+          (activeEl.closest && activeEl.closest('.editor-input')) ||
+          (activeEl.closest && activeEl.closest('[contenteditable="true"]'))
+        );
+
+        console.log("======================================");
+        console.log("toggleFullscreen command triggered!");
+        console.log("Active Element:", activeEl);
+        console.log("Tag Name:", activeEl?.tagName);
+        console.log("Classes:", activeEl?.className);
+        console.log("isContentEditable:", activeEl?.isContentEditable);
+        console.log("isEditorFocused check:", isEditorFocused);
+        console.log("======================================");
+
+        if (isEditorFocused) {
+          console.log("Editor is focused! Preventing fullscreen toggle.");
+          // NOTE: Because Mousetrap intercepts and calls e.preventDefault() before running this command,
+          // simply returning here won't make the 'f' type natively. But we are logging this to test the state.
+          return;
+        }
+        // --- ACTECAL DEBUG END ---
 
         if (!isFullscreen) {
           document.documentElement.requestFullscreen().catch(err => {
             console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
           });
           // Collapse panels
-          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, { 
-            options: { leftPanelClosed: true, rightPanelClosed: true } 
+          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
+            options: { leftPanelClosed: true, rightPanelClosed: true }
           });
         } else {
           if (document.exitFullscreen) {
             document.exitFullscreen();
           }
           // Expand panels when exiting fullscreen
-          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, { 
-            options: { leftPanelClosed: false, rightPanelClosed: false } 
+          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
+            options: { leftPanelClosed: false, rightPanelClosed: false }
           });
         }
       },
@@ -739,35 +723,35 @@ function getPanelModule({ commandsManager, extensionManager, servicesManager }) 
   return [
     {
       name: 'reporting',
-      iconName: 'document',
+      iconName: 'icon-list-view',
       iconLabel: 'Report',
       label: 'Reporting',
       component: ReportingPanel,
     },
     {
       name: 'aiAnalysis',
-      iconName: 'brain',
+      iconName: 'tab-segmentation',
       iconLabel: 'AI Analysis',
       label: 'AI Analysis',
       component: AIAnalysisPanel,
     },
     {
       name: 'activeUsers',
-      iconName: 'group',
+      iconName: 'icon-multiple-patients',
       iconLabel: 'Active Users',
       label: 'Active Participants',
       component: ActiveUsersPanel,
     },
     {
       name: 'notes',
-      iconName: 'chat',
+      iconName: 'notifications-info',
       iconLabel: 'Notes',
       label: 'Collaborative Notes',
       component: CollaborativeNotesPanel,
     },
     {
       name: 'annotationFilters',
-      iconName: 'list',
+      iconName: 'tab-contours',
       iconLabel: 'Filters',
       label: 'Annotation Visibility',
       component: AnnotationFiltersPanel,

@@ -76,6 +76,14 @@ export const segmentation = {
   viewport: '@ohif/extension-cornerstone-dicom-seg.viewportModule.dicom-seg',
 };
 
+export const actecal = {
+  reportingPanel: '@ohif/extension-actecal-erp.panelModule.reporting',
+  aiAnalysisPanel: '@ohif/extension-actecal-erp.panelModule.aiAnalysis',
+  activeUsers: '@ohif/extension-actecal-erp.panelModule.activeUsers',
+  notes: '@ohif/extension-actecal-erp.panelModule.notes',
+  annotationFilters: '@ohif/extension-actecal-erp.panelModule.annotationFilters',
+};
+
 export const extensionDependencies = {
   // Can derive the versions at least process.env.from npm_package_version
   '@ohif/extension-default': '^3.0.0',
@@ -289,10 +297,6 @@ export const toolbarSections = {
   ],
 };
 
-export const actecal = {
-  reportingPanel: 'actecal-erp.panelModule.reporting',
-  aiAnalysisPanel: 'actecal-erp.panelModule.aiAnalysis',
-};
 
 export const radiologyLayout = {
   id: ohif.layout,
@@ -302,6 +306,9 @@ export const radiologyLayout = {
     rightPanels: [
       actecal.reportingPanel,
       actecal.aiAnalysisPanel,
+      actecal.activeUsers,
+      actecal.notes,
+      actecal.annotationFilters,
       cornerstone.segmentation,
       cornerstone.measurements,
     ],
@@ -346,7 +353,7 @@ export function layoutTemplate() {
 }
 
 export const radiologyRoute = {
-  path: 'radiology',
+  path: 'viewer',
   layoutTemplate,
   layoutInstance: radiologyLayout,
 };
@@ -355,7 +362,7 @@ export const modeInstance = {
   // TODO: We're using this as a route segment
   // We should not be.
   id,
-  routeName: 'radiology',
+  routeName: 'viewer',
   // Don't hide this by default - see the registration later to hide the basic
   // instance by default.
   hide: false,

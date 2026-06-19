@@ -442,7 +442,7 @@ const SidePanel = ({
   const getOpenStateComponent = () => {
     return (
       <>
-        <div className="bg-muted flex h-[40px] flex-shrink-0 select-none rounded-t p-2">
+        <div className="bg-muted flex min-h-[40px] h-fit flex-shrink-0 select-none rounded-t p-2">
           {tabs.length === 1 ? getOneTabComponent() : getTabGridComponent()}
         </div>
         <Separator
@@ -454,22 +454,81 @@ const SidePanel = ({
     );
   };
 
+  const getVerticalTabsComponent = () => {
+    return (
+      <div className="bg-muted flex flex-col w-[40px] flex-shrink-0 select-none items-center py-2 space-y-2 border-l border-background h-full overflow-y-auto">
+        <div
+          className="flex h-[28px] w-full cursor-pointer items-center justify-center mb-2"
+          onClick={() => updatePanelOpen(false)}
+          data-cy={`side-panel-header-right`}
+        >
+          {React.createElement(Icons[openStateIconName['right']] || Icons.MissingIcon, {
+            className: 'text-primary',
+          })}
+        </div>
+        {tabs.map((tab, tabIndex) => {
+          const { disabled } = tab;
+          const isActive = tabIndex === activeTabIndex;
+          return (
+            <Tooltip key={tabIndex}>
+              <TooltipTrigger>
+                <div
+                  className={classnames(
+                    'w-[28px] h-[28px] cursor-pointer flex items-center justify-center rounded text-foreground',
+                    isActive ? 'bg-primary/20 text-primary' : 'hover:bg-primary/10 hover:text-primary',
+                    disabled && 'opacity-50 pointer-events-none'
+                  )}
+                  onClick={() => {
+                    return disabled ? null : updateActiveTabIndex(tabIndex);
+                  }}
+                  data-cy={`${tab.name}-btn`}
+                >
+                  {React.createElement(Icons[tab.iconName] || Icons.MissingIcon, {
+                    className: classnames({
+                      'text-primary': true,
+                      'ohif-disabled': disabled,
+                    }),
+                    style: { width: '22px', height: '22px' },
+                  })}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {getToolTipContent(tab.label, disabled)}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div
       className={classnames(className, baseClasses)}
       style={style}
     >
-      {panelOpen ? (
-        <>
-          {getOpenStateComponent()}
+      <div
+        className={classnames(
+          "flex h-full w-full",
+          side === 'right' ? 'flex-row-reverse' : 'flex-col',
+          !panelOpen && 'hidden'
+        )}
+      >
+        {side === 'right' ? getVerticalTabsComponent() : getOpenStateComponent()}
+        <div className="flex-1 flex flex-col overflow-hidden">
           {tabs.map((tab, tabIndex) => {
-            if (tabIndex === activeTabIndex) {
-              return <tab.content key={tabIndex} />;
-            }
-            return null;
+            return (
+              <div 
+                key={tabIndex} 
+                className={classnames("h-full w-full", tabIndex !== activeTabIndex && 'hidden')}
+              >
+                <tab.content />
+              </div>
+            );
           })}
-        </>
-      ) : (
+        </div>
+      </div>
+      {!panelOpen && (
         <React.Fragment>{getCloseStateComponent()}</React.Fragment>
       )}
     </div>
