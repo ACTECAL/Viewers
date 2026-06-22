@@ -241,6 +241,7 @@ export const toolbarSections = {
     'Reset',
     'MoreTools',
     'Layout',
+    'Share',
   ],
 
   [TOOLBAR_SECTIONS.viewportActionMenu.topLeft]: ['orientationMenu', 'dataOverlayMenu'],

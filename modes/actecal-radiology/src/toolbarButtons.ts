@@ -722,6 +722,18 @@ const toolbarButtons: Button[] = [
   //     evaluate: 'evaluate.action',
   //   },
   // },
+  // },
+  {
+    id: 'Share',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'Link',
+      label: 'Share',
+      tooltip: 'Share Study',
+      commands: 'openShareModal',
+      evaluate: 'evaluate.action',
+    },
+  },
 ];
 
 export default toolbarButtons;

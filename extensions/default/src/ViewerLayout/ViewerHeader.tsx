@@ -133,7 +133,7 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
       onClick: () =>
         show({
           content: AboutModal,
-          title: AboutModal?.title ?? t('AboutModal:About ACTECAL AI Viewer'),
+          title: AboutModal?.title ?? '',
           containerClassName: AboutModal?.containerClassName ?? 'max-w-md',
         }),
     },

@@ -610,79 +610,78 @@ async function preRegistration({  extensionManager,
 import ShareModal from './components/ShareModal';
 
 function getCommandsModule({ servicesManager }) {
-  return {
-    actions: {
-      openShareModal: () => {
-        const { uiModalService, viewportGridService } = servicesManager.services;
-        const state = viewportGridService.getState();
-        const activeViewport = state.viewports[state.activeViewportIndex];
-        const studyInstanceUid = activeViewport?.StudyInstanceUID;
+  const actions = {
+    openShareModal: () => {
+      const { uiModalService, viewportGridService } = servicesManager.services;
+      const state = viewportGridService.getState();
+      const activeViewport = state.viewports[state.activeViewportIndex];
+      const studyInstanceUid = activeViewport?.StudyInstanceUID;
 
-        uiModalService.show({
-          content: ShareModal,
-          title: 'Share Study',
-          contentProps: { studyInstanceUid },
-          containerClassName: 'max-w-lg',
+      uiModalService.show({
+        content: ShareModal,
+        title: 'Share Study',
+        contentProps: { studyInstanceUid },
+        containerClassName: 'max-w-lg',
+      });
+    },
+    toggleFullscreen: (context) => {
+      console.log("===================F key===================");
+      const { panelService } = servicesManager.services;
+      const isFullscreen = !!document.fullscreenElement;
+
+      // --- ACTECAL DEBUG START ---
+      const activeEl = document.activeElement;
+      const isEditorFocused = activeEl && (
+        activeEl.isContentEditable ||
+        (activeEl.closest && activeEl.closest('.editor-input')) ||
+        (activeEl.closest && activeEl.closest('[contenteditable="true"]'))
+      );
+
+      console.log("======================================");
+      console.log("toggleFullscreen command triggered!");
+      console.log("Active Element:", activeEl);
+      console.log("Tag Name:", activeEl?.tagName);
+      console.log("Classes:", activeEl?.className);
+      console.log("isContentEditable:", activeEl?.isContentEditable);
+      console.log("isEditorFocused check:", isEditorFocused);
+      console.log("======================================");
+
+      if (isEditorFocused) {
+        console.log("Editor is focused! Preventing fullscreen toggle.");
+        return;
+      }
+      // --- ACTECAL DEBUG END ---
+
+      if (!isFullscreen) {
+        document.documentElement.requestFullscreen().catch(err => {
+          console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
         });
+        panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
+          options: { leftPanelClosed: true, rightPanelClosed: true }
+        });
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+        panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
+          options: { leftPanelClosed: false, rightPanelClosed: false }
+        });
+      }
+    },
+  };
+
+  return {
+    actions,
+    defaultContext: 'VIEWER',
+    definitions: {
+      openShareModal: {
+        commandFn: function(context) { return actions.openShareModal(context); },
       },
-      toggleFullscreen: (context) => {
-        console.log("===================F key===================");
-        const { panelService } = servicesManager.services;
-        const isFullscreen = !!document.fullscreenElement;
-
-        // --- ACTECAL DEBUG START ---
-        const activeEl = document.activeElement;
-        const isEditorFocused = activeEl && (
-          activeEl.isContentEditable ||
-          (activeEl.closest && activeEl.closest('.editor-input')) ||
-          (activeEl.closest && activeEl.closest('[contenteditable="true"]'))
-        );
-
-        console.log("======================================");
-        console.log("toggleFullscreen command triggered!");
-        console.log("Active Element:", activeEl);
-        console.log("Tag Name:", activeEl?.tagName);
-        console.log("Classes:", activeEl?.className);
-        console.log("isContentEditable:", activeEl?.isContentEditable);
-        console.log("isEditorFocused check:", isEditorFocused);
-        console.log("======================================");
-
-        if (isEditorFocused) {
-          console.log("Editor is focused! Preventing fullscreen toggle.");
-          // NOTE: Because Mousetrap intercepts and calls e.preventDefault() before running this command,
-          // simply returning here won't make the 'f' type natively. But we are logging this to test the state.
-          return;
-        }
-        // --- ACTECAL DEBUG END ---
-
-        if (!isFullscreen) {
-          document.documentElement.requestFullscreen().catch(err => {
-            console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
-          });
-          // Collapse panels
-          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
-            options: { leftPanelClosed: true, rightPanelClosed: true }
-          });
-        } else {
-          if (document.exitFullscreen) {
-            document.exitFullscreen();
-          }
-          // Expand panels when exiting fullscreen
-          panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
-            options: { leftPanelClosed: false, rightPanelClosed: false }
-          });
-        }
+      toggleFullscreen: {
+        commandFn: function(context) { return actions.toggleFullscreen(context); },
       },
     },
-      definitions: {
-        openShareModal: {
-          commandFn: function(context) { return this.actions.openShareModal(context); },
-        },
-        toggleFullscreen: {
-          commandFn: function(context) { return this.actions.toggleFullscreen(context); },
-        },
-      },
-    };
+  };
 }
 
 function getToolbarModule({ commandsManager }) {

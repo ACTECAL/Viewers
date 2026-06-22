@@ -94,7 +94,7 @@ function SocialItem({ icon, url, text, className }: SocialItemProps) {
         className="py-6 text-lg"
       >
         <a
-          href={`https://github.com/${url}`}
+          href={url}
           target="_blank"
           rel="noopener noreferrer"
         >

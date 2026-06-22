@@ -21,14 +21,6 @@ window.config = {
   showWarningMessageForCrossOrigin: true,
   showCPUFallbackMessage: true,
   showLoadingIndicator: true,
-  hotkeys: [
-    {
-      commandName: 'toggleFullscreen',
-      label: 'Fullscreen',
-      keys: ['f'],
-      isEditable: true,
-    },
-  ],
   experimentalStudyBrowserSort: false,
   strictZSpacingForVolumeViewport: true,
   groupEnabledModesFirst: true,
