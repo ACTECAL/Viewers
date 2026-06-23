@@ -182,31 +182,11 @@ import { parse } from 'query-string';
 
 const extensionId = '@ohif/extension-actecal-erp';
 
-const measurementService =
-  new MeasurementService();
-
-const measurementSource =
-  measurementService.createSource(
-    'actecal-erp',
-    '1'
-  );
-
-const toMeasurementSchema =
-  data => ({
-    ...data,
-    source: measurementSource,
-  });
-
-const apiService =
-  new ApiService();
-
-
-
 /* ---------------------------
    STUDY INITIALIZATION
 ---------------------------- */
 
-async function initializeStudy(extensionManager, servicesManager) {
+async function initializeStudy(extensionManager, servicesManager, measurementService, measurementSource, toMeasurementSchema) {
 
   try {
     const { uiNotificationService } = servicesManager.services;
@@ -476,62 +456,9 @@ try {
 
 
     /* ---------------------------
-       LOAD MEASUREMENTS
+       MEASUREMENTS NOW LOADED DYNAMICALLY
+       via displaySetService in preRegistration
     ---------------------------- */
-
-    for (
-      const uid
-      of studyInstanceUids
-    ) {
-
-      try {
-
-        const measurements =
-          await apiService
-            .fetchMeasurements(
-              uid
-            );
-
-        console.log(
-          `Measurements for ${uid}:`,
-          measurements
-        );
-
-        measurements
-          ?.forEach(
-            measurement => {
-
-              measurementService
-                .addRawMeasurement(
-                  measurementSource,
-                  'customAnnotationType',
-                  measurement,
-                  toMeasurementSchema
-                );
-
-            }
-          );
-
-
-
-        /* ---------------------------
-           REALTIME SOCKET
-        ---------------------------- */
-
-        // IoTService.connect(
-        //   uid
-        // );
-
-      } catch (err) {
-
-        console.error(
-          `Measurement error for ${uid}:`,
-          err
-        );
-
-      }
-
-    }
 
   } catch (err) {
 
@@ -560,12 +487,70 @@ async function preRegistration({  extensionManager,
     "Actecal extension loaded"
   );
 
+  const { measurementService } = servicesManager.services;
 
+  const measurementSource =
+    measurementService.createSource(
+      'actecal-erp',
+      '1'
+    );
+
+  const toMeasurementSchema =
+    data => ({
+      ...data,
+      source: measurementSource,
+    });
+
+  const queryParams = parse(window.location.search);
+  const apiService = new ApiService(queryParams.userId);
 
   // Initialize viewer
   // initializeStudy(extensionManager);
 
-  await initializeStudy(extensionManager, servicesManager);
+  await initializeStudy(extensionManager, servicesManager, measurementService, measurementSource, toMeasurementSchema);
+
+  // Hook into display set loading to dynamically fetch measurements when navigating via Single Page App routing
+  const { displaySetService } = servicesManager.services;
+  const loadedStudiesForMeasurements = new Set();
+
+  displaySetService.subscribe(
+    displaySetService.EVENTS.DISPLAY_SETS_ADDED,
+    async ({ displaySetsAdded }) => {
+      if (!displaySetsAdded || displaySetsAdded.length === 0) return;
+      
+      const studyUid = displaySetsAdded[0].StudyInstanceUID;
+      if (!studyUid || loadedStudiesForMeasurements.has(studyUid)) return;
+      
+      loadedStudiesForMeasurements.add(studyUid);
+      
+      try {
+        console.log(`Loading measurements dynamically for study: ${studyUid}`);
+        
+        // ensure apiService uses latest userId if available
+        const currentParams = parse(window.location.search);
+        const dynamicApiService = new ApiService(currentParams.userId || queryParams.userId);
+        
+        const measurements = await dynamicApiService.fetchMeasurements(studyUid);
+        console.log(`Fetched measurements dynamically:`, measurements);
+        
+        measurements?.forEach(measurement => {
+          measurementService.addRawMeasurement(
+            measurementSource,
+            'customAnnotationType',
+            measurement,
+            toMeasurementSchema
+          );
+        });
+      } catch(err) {
+        console.error(`Failed to load measurements dynamically for ${studyUid}:`, err);
+      }
+    }
+  );
+
+  // Clear cache if mode exits
+  measurementService.subscribe(measurementService.EVENTS.MEASUREMENTS_CLEARED, () => {
+    loadedStudiesForMeasurements.clear();
+  });
 
 
 
@@ -574,27 +559,70 @@ async function preRegistration({  extensionManager,
      MEASUREMENT EVENTS
   ---------------------------- */
 
+  const measurementStudyMap = {};
+
+  const formatPayload = (m, eventType) => {
+    return {
+      uid: m.uid,
+      SOPInstanceUID: m.SOPInstanceUID,
+      FrameOfReferenceUID: m.FrameOfReferenceUID,
+      points: m.points,
+      toolName: m.toolName || m.metadata?.toolName,
+      label: m.label,
+      displayText: m.displayText,
+      type: m.type,
+      eventType: eventType
+    };
+  };
+
+  const saveTimers = {};
+
+  const debouncedSaveMeasurement = (studyUid, measurement, eventType) => {
+    const uid = measurement.uid;
+    measurementStudyMap[uid] = studyUid;
+    
+    if (saveTimers[uid]) {
+      clearTimeout(saveTimers[uid]);
+    }
+    const payload = formatPayload(measurement, eventType);
+    saveTimers[uid] = setTimeout(() => {
+      apiService.saveMeasurement(studyUid, payload).catch(e => console.error('Save failed', e));
+      delete saveTimers[uid];
+    }, 800);
+  };
+
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_ADDED, event => {
     console.log("MEASUREMENT_ADDED:", event);
     const measurement = event?.measurement;
-    if (measurement?.studyInstanceUid) {
-      apiService.saveMeasurement(measurement.studyInstanceUid, measurement);
+    const studyUid = measurement?.referenceStudyUID || measurement?.studyInstanceUid;
+    if (studyUid) {
+      debouncedSaveMeasurement(studyUid, measurement, 'ADD');
+      
+      // Dispatch custom event to inject into Lexical
+      const customEvent = new CustomEvent('actecal:injectMeasurement', {
+         detail: { measurement }
+      });
+      window.dispatchEvent(customEvent);
     }
   });
 
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_UPDATED, event => {
-    console.log("MEASUREMENT_UPDATED:", event);
     const measurement = event?.measurement;
-    if (measurement?.studyInstanceUid) {
-      apiService.saveMeasurement(measurement.studyInstanceUid, measurement);
+    const studyUid = measurement?.referenceStudyUID || measurement?.studyInstanceUid;
+    if (studyUid) {
+      debouncedSaveMeasurement(studyUid, measurement, 'UPDATE');
     }
   });
 
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_REMOVED, event => {
     console.log("MEASUREMENT_REMOVED:", event);
-    const measurement = event?.measurement;
-    if (measurement?.annotationUID) {
-      apiService.deleteMeasurement(measurement.annotationUID);
+    const annotationUID = typeof event.measurement === 'string' ? event.measurement : event.measurement?.uid;
+    if (annotationUID) {
+      const studyUid = measurementStudyMap[annotationUID];
+      if (studyUid) {
+        apiService.saveMeasurement(studyUid, { uid: annotationUID, eventType: 'DELETE' }).catch(e => console.error('Delete failed', e));
+        delete measurementStudyMap[annotationUID];
+      }
     }
   });
 

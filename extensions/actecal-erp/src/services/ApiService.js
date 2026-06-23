@@ -71,6 +71,32 @@ async fetchStudyContext(studyInstanceUids) {
     return response.json();
   }
 
+  async getSubmitReportUrls(studyInstanceUid) {
+    const response = await fetch(`${this.baseUrl}/submit-report?studyInstanceUid=${studyInstanceUid}`, {
+      credentials: 'include',
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch submit report URLs');
+    }
+    return response.json();
+  }
+
+  async confirmReportSubmission(studyInstanceUid) {
+    const response = await fetch(`${this.baseUrl}/submit-report`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: this.getHeaders({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({ studyInstanceUid }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to confirm report submission');
+    }
+    return response.json();
+  }
+
   async deleteMeasurement(annotationUID) {
     const response = await fetch(`${this.baseUrl}/measurements/${annotationUID}`, {
       method: 'DELETE',
