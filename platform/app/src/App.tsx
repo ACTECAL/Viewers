@@ -36,7 +36,9 @@ import createRoutes from './routes';
 import appInit from './appInit.js';
 import OpenIdConnectRoutes from './utils/OpenIdConnectRoutes';
 import { ShepherdJourneyProvider } from 'react-shepherd';
+import MobileBottomNav from '../../../extensions/actecal-erp/src/components/MobileBottomNav';
 import './App.css';
+import './MobileOptimizations.css';
 
 let commandsManager: CommandsManager,
   extensionManager: ExtensionManager,
@@ -190,6 +192,7 @@ function App({
         basename={routerBasename}
         future={routerFutureFlags}
       >
+        <MobileBottomNav />
         {authRoutes}
         {appRoutes}
       </BrowserRouter>

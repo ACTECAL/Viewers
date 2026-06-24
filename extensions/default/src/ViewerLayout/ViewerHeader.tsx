@@ -78,7 +78,7 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (!localStorage.getItem('hideShortcutToast')) {
+      if (!localStorage.getItem('hideShortcutToast') && window.innerWidth > 1200) {
         setShowShortcutToast(true);
       }
     }, 2500);
@@ -107,6 +107,15 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
     if (dataSourceIdx !== -1 && existingDataSource) {
       searchQuery.append('datasources', pathname.substring(dataSourceIdx + 1));
     }
+    
+    // Explicitly preserve Actecal specific query parameters
+    const currentQuery = new URLSearchParams(window.location.search);
+    ['userId', 'tenant', 'sharecode'].forEach(key => {
+      if (currentQuery.has(key)) {
+        searchQuery.append(key, currentQuery.get(key));
+      }
+    });
+    
     preserveQueryParameters(searchQuery);
 
     navigate({
@@ -167,6 +176,35 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
       },
     });
   }
+
+  // Handle Mobile events triggered from the MobileBottomNav
+  useEffect(() => {
+    const handleMobileNavigateHome = () => onClickReturnButton();
+    const handleMobileShowAbout = () => {
+      show({
+        content: AboutModal,
+        title: AboutModal?.title ?? '',
+        containerClassName: AboutModal?.containerClassName ?? 'max-w-md',
+      });
+    };
+    const handleMobileShowPreferences = () => {
+      show({
+        content: UserPreferencesModal,
+        title: UserPreferencesModal.title ?? t('UserPreferencesModal:User preferences'),
+        containerClassName: UserPreferencesModal?.containerClassName ?? 'flex max-w-4xl p-6 flex-col',
+      });
+    };
+
+    window.addEventListener('mobile-navigate-worklist', handleMobileNavigateHome);
+    window.addEventListener('mobile-show-about', handleMobileShowAbout);
+    window.addEventListener('mobile-show-shortcuts', handleMobileShowPreferences);
+
+    return () => {
+      window.removeEventListener('mobile-navigate-worklist', handleMobileNavigateHome);
+      window.removeEventListener('mobile-show-about', handleMobileShowAbout);
+      window.removeEventListener('mobile-show-shortcuts', handleMobileShowPreferences);
+    };
+  }, [onClickReturnButton, show, AboutModal, UserPreferencesModal, t]);
 
   return (
     <Header

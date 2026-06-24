@@ -96,6 +96,159 @@ function InitialStatePlugin({ content, studyUid }: { content: string | null, stu
   return null;
 }
 
+function MeasurementInjectionPlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const handleInjectMeasurement = (e: any) => {
+      const measurement = e.detail?.measurement;
+      if (!measurement) return;
+
+      editor.update(() => {
+        const root = $getRoot();
+        
+        let textToAppend = 'Measurement added';
+        // Try to intelligently parse OHIF measurement text
+        if (measurement.displayText) {
+          if (Array.isArray(measurement.displayText)) {
+            textToAppend = measurement.displayText.join(', ');
+          } else if (typeof measurement.displayText === 'object') {
+            const primary = measurement.displayText.primary;
+            if (Array.isArray(primary)) {
+              textToAppend = primary.join(', ');
+            } else if (primary) {
+              textToAppend = primary.toString();
+            } else {
+              textToAppend = JSON.stringify(measurement.displayText);
+            }
+          } else {
+            textToAppend = String(measurement.displayText);
+          }
+        } else if (measurement.text) {
+            textToAppend = measurement.text;
+        } else if (measurement.toolName) {
+            textToAppend = `${measurement.toolName} annotation recorded.`;
+        }
+
+        const paragraphNode = $createParagraphNode();
+        paragraphNode.append($createTextNode(`• ${textToAppend}`));
+        root.append(paragraphNode);
+      });
+    };
+
+    window.addEventListener('actecal:injectMeasurement', handleInjectMeasurement);
+    return () => window.removeEventListener('actecal:injectMeasurement', handleInjectMeasurement);
+  }, [editor]);
+
+  return null;
+}
+
+function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
+  const [editor] = useLexicalComposerContext();
+  const { servicesManager } = useSystem();
+  const { uiNotificationService } = servicesManager.services;
+
+  useEffect(() => {
+    const handleSubmit = async () => {
+      if (!studyUid) return;
+
+      try {
+        uiNotificationService.show({
+          title: 'Submitting Report',
+          message: 'Preparing your report for submission...',
+          type: 'info',
+        });
+
+        // 1. Extract JSON state
+        const editorState = editor.getEditorState();
+        const jsonState = editorState.toJSON();
+        const jsonBlob = new Blob([JSON.stringify(jsonState)], { type: 'application/json' });
+
+        // 2. Generate PDF
+        const editorRoot = document.querySelector('.ActecalReportingEditor-root') || document.querySelector('[data-lexical-editor]');
+        if (!editorRoot) {
+           throw new Error("Could not find editor DOM element");
+        }
+        
+        uiNotificationService.show({
+          title: 'Generating PDF',
+          message: 'Creating PDF version of your report...',
+          type: 'info',
+        });
+
+        const html2pdf = (await import('html2pdf.js')).default;
+        
+        const pdfOpt = {
+          margin:       10,
+          filename:     'report.pdf',
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { scale: 2 },
+          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        
+        const pdfBlob = await html2pdf().set(pdfOpt).from(editorRoot).output('blob');
+
+        uiNotificationService.show({
+          title: 'Uploading Report',
+          message: 'Uploading report files to server...',
+          type: 'info',
+        });
+
+        // 3. Get Presigned URLs
+        const apiService = new ApiService();
+        const urls = await apiService.getSubmitReportUrls(studyUid);
+        const { lexicalUploadUrl, pdfUploadUrl } = urls;
+        
+        if (!lexicalUploadUrl || !pdfUploadUrl) {
+           throw new Error("Backend did not provide valid upload URLs");
+        }
+
+        // 4. Upload JSON
+        const jsonUpload = fetch(lexicalUploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: jsonBlob
+        });
+
+        // 5. Upload PDF
+        const pdfUpload = fetch(pdfUploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/pdf' },
+          body: pdfBlob
+        });
+
+        await Promise.all([jsonUpload, pdfUpload]);
+
+        // 6. Confirm Submission
+        await apiService.confirmReportSubmission(studyUid);
+
+        uiNotificationService.show({
+          title: 'Report Submitted',
+          message: 'Report successfully submitted to the server!',
+          type: 'success',
+          duration: 5000,
+        });
+
+      } catch (err: any) {
+        console.error("Submit Report Failed:", err);
+        uiNotificationService.show({
+          title: 'Submission Failed',
+          message: err.message || 'Failed to submit report',
+          type: 'error',
+          duration: 10000,
+        });
+      }
+    };
+
+    window.addEventListener('trigger-submit-report', handleSubmit);
+    return () => {
+      window.removeEventListener('trigger-submit-report', handleSubmit);
+    };
+  }, [editor, studyUid, uiNotificationService]);
+
+  return null;
+}
+
 function ToolbarPlugin({ isExpanded }) {
   const [editor] = useLexicalComposerContext();
   const [isRecording, setIsRecording] = useState(false);
@@ -361,7 +514,11 @@ function ReportingPanel() {
         const apiService = new ApiService();
         try {
           const response = await apiService.fetchDraftReport(studyInstanceUid);
-          if (response && response.text) {
+          if (response && response.presignedUrl) {
+            const fileRes = await fetch(response.presignedUrl);
+            const lexicalJson = await fileRes.json();
+            setDraftContent(JSON.stringify(lexicalJson));
+          } else if (response && response.text) {
             setDraftContent(response.text);
           } else if (response && response.report) {
             setDraftContent(response.report);
@@ -395,13 +552,19 @@ function ReportingPanel() {
     }
   };
 
+  useEffect(() => {
+    const handleMobileToggle = () => setIsExpanded(prev => !prev);
+    window.addEventListener('toggle-mobile-report', handleMobileToggle);
+    return () => window.removeEventListener('toggle-mobile-report', handleMobileToggle);
+  }, []);
+
   return (
     <div className="flex flex-col h-full bg-primary-dark p-2 text-white relative">
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-lg font-bold">Create Report</h3>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light flex items-center gap-1"
+          className="hidden xl:flex text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light items-center gap-1"
           title={isExpanded ? "Collapse" : "Pop out Editor"}
         >
           {isExpanded ? '🗗 Collapse' : '⛶ Expand'}
@@ -447,6 +610,8 @@ function ReportingPanel() {
               <HistoryPlugin />
               <OnChangePlugin onChange={handleEditorChange} />
               <InitialStatePlugin content={draftContent} studyUid={studyUid} />
+              <MeasurementInjectionPlugin />
+              <SubmitReportPlugin studyUid={studyUid} />
             </div>
           </LexicalComposer>
           {isExpanded ? (
