@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import classnames from 'classnames';
 import { useDrag } from 'react-dnd';
@@ -47,13 +47,31 @@ const Thumbnail = ({
 
   const [lastTap, setLastTap] = useState(0);
 
+  const [isMobileTapped, setIsMobileTapped] = useState(false);
+
+  useEffect(() => {
+    const handleGlobalInteraction = (e) => {
+      if (!e.target.closest(`#thumbnail-${displaySetInstanceUID}`)) {
+        setIsMobileTapped(false);
+      }
+    };
+    document.addEventListener('click', handleGlobalInteraction);
+    document.addEventListener('touchstart', handleGlobalInteraction);
+    return () => {
+      document.removeEventListener('click', handleGlobalInteraction);
+      document.removeEventListener('touchstart', handleGlobalInteraction);
+    };
+  }, [displaySetInstanceUID]);
+
   const handleTouchEnd = e => {
     const currentTime = new Date().getTime();
     const tapLength = currentTime - lastTap;
     if (tapLength < 300 && tapLength > 0) {
       onDoubleClick(e);
+      setIsMobileTapped(false);
     } else {
       onClick(e);
+      setIsMobileTapped(true);
     }
     setLastTap(currentTime);
   };
@@ -77,6 +95,23 @@ const Thumbnail = ({
               />
             ) : (
               <div className="bg-background h-[114px] w-[128px] rounded"></div>
+            )}
+
+            {/* Mobile Open Overlay for Tapped Thumbnail */}
+            {isMobileTapped && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10 md:hidden rounded">
+                <button 
+                  className="mobile-open-btn bg-[#5b65d6] hover:bg-[#4a54c4] text-white px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest shadow-lg shadow-black/50"
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     onDoubleClick(e);
+                     setIsMobileTapped(false);
+                     window.dispatchEvent(new CustomEvent('mobile-force-show-viewer'));
+                  }}
+                >
+                  OPEN
+                </button>
+              </div>
             )}
 
             {/* bottom left */}

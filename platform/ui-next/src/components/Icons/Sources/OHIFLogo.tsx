@@ -22,7 +22,6 @@ export const OHIFLogo = (props: IconProps) => (
         transform="translate(-74, -297)"
       >
         <g
-          id="toolbar-branding-open-health-imaging-foundation"
           transform="translate(74, 297)"
         >
           <rect

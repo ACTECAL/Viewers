@@ -552,13 +552,19 @@ function ReportingPanel() {
     }
   };
 
+  useEffect(() => {
+    const handleMobileToggle = () => setIsExpanded(prev => !prev);
+    window.addEventListener('toggle-mobile-report', handleMobileToggle);
+    return () => window.removeEventListener('toggle-mobile-report', handleMobileToggle);
+  }, []);
+
   return (
     <div className="flex flex-col h-full bg-primary-dark p-2 text-white relative">
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-lg font-bold">Create Report</h3>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light flex items-center gap-1"
+          className="hidden xl:flex text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light items-center gap-1"
           title={isExpanded ? "Collapse" : "Pop out Editor"}
         >
           {isExpanded ? '🗗 Collapse' : '⛶ Expand'}

@@ -3,6 +3,8 @@
 // import { MeasurementService, ExtensionManager, CommandsManager, ServicesManager, ServiceProvidersManager, HotkeysManager } from '@ohif/core';
 // import { parse } from 'query-string';
 
+import React from 'react';
+
 // const extensionId = 'actecal-erp';
 
 // const measurementService = new MeasurementService();
@@ -551,6 +553,7 @@ async function preRegistration({  extensionManager,
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENTS_CLEARED, () => {
     loadedStudiesForMeasurements.clear();
   });
+
 
 
 

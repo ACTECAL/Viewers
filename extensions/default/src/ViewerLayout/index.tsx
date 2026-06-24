@@ -200,13 +200,61 @@ function ViewerLayout({
         setActiveRightPanelId(e.detail.panelId);
       }
     };
+
+    const handleMobileToggleLeft = (e: any) => {
+      if (e.detail?.forceClose) {
+        setLeftPanelClosed(true);
+      } else if (e.detail?.forceOpen) {
+        setLeftPanelClosed(false);
+        setRightPanelClosed(true); // Close right panel if open
+      } else {
+        setLeftPanelClosed(prev => !prev);
+        setRightPanelClosed(true); // Close right panel if open
+      }
+    };
+
+    const handleMobileToggleRight = (e: any) => {
+      if (e.detail?.forceClose) {
+        setRightPanelClosed(true);
+      } else if (e.detail?.forceOpen) {
+        setRightPanelClosed(false);
+        setLeftPanelClosed(true); // Close left panel if open
+      } else {
+        setRightPanelClosed(prev => !prev);
+        setLeftPanelClosed(true); // Close left panel if open
+      }
+    };
+
     window.addEventListener('panel-tab-changed', handleTabChange);
+    window.addEventListener('toggle-mobile-left-panel', handleMobileToggleLeft);
+    window.addEventListener('toggle-mobile-right-panel', handleMobileToggleRight);
+    
+    const handleMobileActivateTab = (e: any) => {
+      if (e.detail?.panelId) {
+        panelService.activatePanel(e.detail.panelId);
+      }
+    };
+    window.addEventListener('activate-mobile-panel-tab', handleMobileActivateTab);
 
     return () => {
       unsubscribe();
       window.removeEventListener('panel-tab-changed', handleTabChange);
+      window.removeEventListener('toggle-mobile-left-panel', handleMobileToggleLeft);
+      window.removeEventListener('toggle-mobile-right-panel', handleMobileToggleRight);
+      window.removeEventListener('activate-mobile-panel-tab', handleMobileActivateTab);
     };
   }, [panelService, hasPanels]);
+
+  // Force close panels on mobile load
+  useEffect(() => {
+    if (window.innerWidth < 1200) {
+      const timer = setTimeout(() => {
+        setLeftPanelClosed(true);
+        setRightPanelClosed(true);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const viewportComponents = viewports.map(getViewportComponentData);
 
@@ -317,11 +365,6 @@ function ViewerLayout({
                     servicesManager={servicesManager}
                     {...leftPanelProps}
                   />
-                  {!leftPanelClosedState && (
-                    <div className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none z-50">
-                      <span className="text-[9px] text-[#5ACCE6] opacity-50 font-medium tracking-widest uppercase">Powered by Actecal</span>
-                    </div>
-                  )}
                 </ResizablePanel>
                 <ResizableHandle
                   onDragging={onHandleDragging}

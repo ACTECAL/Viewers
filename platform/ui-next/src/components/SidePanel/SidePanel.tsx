@@ -428,13 +428,34 @@ const SidePanel = ({
     return (
       <div
         className={classnames(
-          'text-primary flex grow cursor-pointer select-none justify-center self-center text-[13px]'
+          'text-primary flex grow select-none justify-center self-center text-[13px]'
         )}
-        data-cy={`${tabs[0].name}-btn`}
-        onClick={() => updatePanelOpen(!panelOpen)}
       >
         {getCloseIcon()}
-        <span>{tabs[0].label}</span>
+        {tabs[0].name === 'seriesList' ? (
+          <div className="flex items-center gap-2">
+            <span className="hidden xl:inline">{tabs[0].label}</span>
+            <div 
+              className="xl:hidden flex items-center justify-center bg-primary/20 hover:bg-primary/30 text-primary px-3 py-1 rounded cursor-pointer transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                updatePanelOpen(false);
+                window.dispatchEvent(new CustomEvent('mobile-navigate-worklist'));
+              }}
+            >
+              <Icons.ByName name="icon-list-view" className="w-4 h-4 mr-1.5" />
+              <span className="font-semibold text-[11px] uppercase tracking-wider">View Worklist</span>
+            </div>
+          </div>
+        ) : (
+          <span 
+            className="cursor-pointer" 
+            data-cy={`${tabs[0].name}-btn`}
+            onClick={() => updatePanelOpen(!panelOpen)}
+          >
+            {tabs[0].label}
+          </span>
+        )}
       </div>
     );
   };
@@ -504,7 +525,7 @@ const SidePanel = ({
 
   return (
     <div
-      className={classnames(className, baseClasses)}
+      className={classnames(className, baseClasses, 'side-panel-root')}
       style={style}
     >
       <div
@@ -527,6 +548,11 @@ const SidePanel = ({
             );
           })}
         </div>
+        {side === 'left' && (
+          <div className="w-full py-3 flex flex-col items-center justify-center bg-primary-dark mt-auto">
+            <span className="text-[10px] text-white/50 uppercase tracking-widest font-semibold">Powered by ACTECAL</span>
+          </div>
+        )}
       </div>
       {!panelOpen && (
         <React.Fragment>{getCloseStateComponent()}</React.Fragment>
