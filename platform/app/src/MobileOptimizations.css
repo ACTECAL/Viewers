@@ -82,7 +82,8 @@
   .mobile-left-panel-open [data-cy="side-panel-left"],
   .mobile-right-panel-open [data-cy="side-panel-right"] {
     width: 100vw !important;
-    height: 80vh !important;
+    height: auto !important;
+    top: 48px !important; /* Below the top header */
     max-width: 100vw !important;
     display: flex !important;
     flex-direction: column !important;
