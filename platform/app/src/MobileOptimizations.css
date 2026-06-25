@@ -114,4 +114,67 @@
     overflow-x: hidden !important;
     flex: 1 !important;
   }
+  /* =========================================
+     STUDY LIST (WORKLIST) MOBILE LAYOUT
+  ========================================= */
+  
+  /* Hide Study Date (3), Description (4), Accession (6) */
+  /* 1. Header (InputGroup) */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(3),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(4),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(6) {
+    display: none !important;
+  }
+
+  /* 2. Table Row Cells */
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(3),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(4),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(6) {
+    display: none !important;
+  }
+
+  /* Adjust widths of remaining columns: 
+     Patient Name (1): 40%
+     MRN (2): 30%
+     Modality (5): 15%
+     Instances (7): 15% 
+  */
+  
+  /* Patient Name */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(1),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(1) {
+    width: 40% !important;
+    max-width: 40% !important;
+    flex: 0 0 40% !important;
+  }
+
+  /* MRN */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(2),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(2) {
+    width: 30% !important;
+    max-width: 30% !important;
+    flex: 0 0 30% !important;
+  }
+
+  /* Modality */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(5),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(5) {
+    width: 15% !important;
+    max-width: 15% !important;
+    flex: 0 0 15% !important;
+  }
+
+  /* Instances */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(7),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(7) {
+    width: 15% !important;
+    max-width: 15% !important;
+    flex: 0 0 15% !important;
+  }
+
+  /* Make sure text doesn't overflow */
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
 }

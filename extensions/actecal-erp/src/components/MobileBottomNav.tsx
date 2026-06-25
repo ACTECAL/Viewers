@@ -42,6 +42,30 @@ function MobileBottomNav() {
   // We only want to render this on mobile screens in portrait mode
   const [isMobile, setIsMobile] = useState(checkIsMobile());
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [toolbarTick, setToolbarTick] = useState(0);
+
+  const { toolbarService } = servicesManager.services;
+
+  useEffect(() => {
+    if (!toolbarService) return;
+    const handleToolbarModified = () => setToolbarTick(t => t + 1);
+    const sub1 = toolbarService.subscribe(toolbarService.EVENTS.TOOL_BAR_STATE_MODIFIED, handleToolbarModified);
+    const sub2 = toolbarService.subscribe(toolbarService.EVENTS.TOOL_BAR_MODIFIED, handleToolbarModified);
+    return () => {
+      sub1.unsubscribe();
+      sub2.unsubscribe();
+    };
+  }, [toolbarService]);
+
+  const isToolDisabled = (toolId) => {
+    // Special core buttons that are not evaluated like standard tools
+    if (['Reset', 'Fullscreen', 'Invert', 'FlipHorizontal', 'RotateRight'].includes(toolId)) {
+      return false;
+    }
+    const button = toolbarService?.getButton(toolId);
+    // If we can't find it or it's explicitly disabled
+    return button?.props?.disabled === true;
+  };
 
   useEffect(() => {
     const handleResize = () => setIsMobile(checkIsMobile());
@@ -556,16 +580,19 @@ function MobileBottomNav() {
               { id: 'RotateRight', label: 'Rotate', icon: '↻' },
               { id: 'Reset', label: 'Reset View', icon: '🔄' },
               { id: 'Fullscreen', label: isFullscreen ? 'Exit Full Screen' : 'Full Screen', icon: isFullscreen ? '✖️' : '🔲' }
-            ].map(tool => (
+            ].map(tool => {
+              const disabled = isToolDisabled(tool.id);
+              return (
               <button
                 key={tool.id}
-                onClick={() => handleToolSelect(tool.id)}
-                className="flex flex-col items-center justify-center p-2 rounded-lg bg-[#1e2235] text-gray-300 hover:bg-[#3a3f99]"
+                onClick={() => !disabled && handleToolSelect(tool.id)}
+                className={`flex flex-col items-center justify-center p-2 rounded-lg ${disabled ? 'opacity-30 cursor-not-allowed bg-[#131622]' : 'bg-[#1e2235] hover:bg-[#3a3f99]'} text-gray-300`}
+                disabled={disabled}
               >
                 <span className="text-xl mb-1">{tool.icon}</span>
                 <span className="text-[10px] text-center font-medium uppercase tracking-wider">{tool.label}</span>
               </button>
-            ))}
+            )})}
           </div>
         </div>
       )}
