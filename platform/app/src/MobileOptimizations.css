@@ -100,6 +100,13 @@
   }
 
   /* Ensure panel contents scroll properly */
+  [data-cy="side-panel-left"],
+  [data-cy="side-panel-right"] {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important; /* Smooth scrolling on iOS */
+  }
+
   [data-cy="side-panel-left"] > div,
   [data-cy="side-panel-right"] > div,
   .ohif-scrollbar {
