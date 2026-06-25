@@ -18,11 +18,11 @@
     display: none !important;
   }
   
-  /* 4. Right (Undo/Redo, PatientInfo, Settings Gear) */
+  /* 4. Right (Undo/Redo, Settings Gear) */
   /* We want to hide Undo/Redo, Dividers, and Settings Gear, but KEEP PatientInfo */
-  div[class*="right-0"] div.text-primary, /* Undo/Redo/Fullscreen */
-  div[class*="right-0"] [class*="flex-shrink-0"], /* Settings Gear */
-  div[class*="right-0"] [class*="border-muted"] /* Dividers */ {
+  div[class*="right-0"] > div > div.text-primary, /* Undo/Redo/Fullscreen */
+  div[class*="right-0"] > div > [class*="flex-shrink-0"], /* Settings Gear */
+  div[class*="right-0"] > div > [class*="border-muted"] /* Dividers */ {
     display: none !important;
   }
 
