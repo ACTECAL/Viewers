@@ -684,15 +684,32 @@ function getCommandsModule({ servicesManager }) {
       // --- ACTECAL DEBUG END ---
 
       if (!isFullscreen) {
-        document.documentElement.requestFullscreen().catch(err => {
-          console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
-        });
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(err => {
+            console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
+          });
+        } else if (document.documentElement.webkitRequestFullscreen) {
+          document.documentElement.webkitRequestFullscreen();
+        } else {
+          console.warn('Fullscreen API is not supported on this device/browser.');
+          const { uiNotificationService } = servicesManager.services;
+          if (uiNotificationService) {
+            uiNotificationService.show({
+              title: 'Fullscreen Not Supported',
+              message: 'Your browser or device (e.g., iOS Safari) does not support the Fullscreen API.',
+              type: 'info',
+              duration: 3000,
+            });
+          }
+        }
         panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
           options: { leftPanelClosed: true, rightPanelClosed: true }
         });
       } else {
         if (document.exitFullscreen) {
           document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
         }
         panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
           options: { leftPanelClosed: false, rightPanelClosed: false }
