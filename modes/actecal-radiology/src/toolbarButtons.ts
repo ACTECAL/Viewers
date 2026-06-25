@@ -648,6 +648,17 @@ const toolbarButtons: Button[] = [
     },
   },
   {
+    id: 'Fullscreen',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'icon-tool-expand',
+      label: i18n.t('Buttons:Fullscreen'),
+      tooltip: i18n.t('Buttons:Toggle Fullscreen'),
+      commands: 'toggleFullscreen',
+      evaluate: 'evaluate.action',
+    },
+  },
+  {
     id: 'Layout',
     uiType: 'ohif.layoutSelector',
     props: {

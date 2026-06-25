@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { useResizeDetector } from 'react-resize-detector';
 import * as cs3DTools from '@cornerstonejs/tools';
 import { Enums, eventTarget, getEnabledElement } from '@cornerstonejs/core';
 import { MeasurementService, useViewportRef } from '@ohif/core';
@@ -10,6 +11,7 @@ import { setEnabledElement } from '../state';
 import './OHIFCornerstoneViewport.css';
 import CornerstoneOverlays from './Overlays/CornerstoneOverlays';
 import CinePlayer from '../components/CinePlayer';
+import FloatingDeleteMeasurement from '../components/FloatingDeleteMeasurement';
 import type { Types } from '@ohif/core';
 
 import OHIFViewportActionCorners from '../components/OHIFViewportActionCorners';
@@ -304,11 +306,12 @@ const OHIFCornerstoneViewport = React.memo(
       loadViewportData();
     }, [viewportOptions, displaySets, dataSource]);
 
+    const { ref: resizeRef } = useResizeDetector({ onResize });
+
     const Notification = customizationService.getCustomization('ui.notificationComponent');
 
     return (
-      <React.Fragment>
-        <div className="viewport-wrapper">
+        <div className="viewport-wrapper" ref={resizeRef}>
           <div
             className="cornerstone-viewport-element"
             style={{ height: '100%', width: '100%' }}
@@ -338,24 +341,22 @@ const OHIFCornerstoneViewport = React.memo(
             viewportId={viewportId}
             servicesManager={servicesManager}
           />
+          <div className="absolute top-[24px] w-full">
+            {viewportDialogState.viewportId === viewportId && (
+              <Notification
+                id="viewport-notification"
+                message={viewportDialogState.message}
+                type={viewportDialogState.type}
+                actions={viewportDialogState.actions}
+                onSubmit={viewportDialogState.onSubmit}
+                onOutsideClick={viewportDialogState.onOutsideClick}
+                onKeyPress={viewportDialogState.onKeyPress}
+              />
+            )}
+          </div>
+          <OHIFViewportActionCorners viewportId={viewportId} />
+          <FloatingDeleteMeasurement />
         </div>
-        {/* top offset of 24px to account for ViewportActionCorners. */}
-        <div className="absolute top-[24px] w-full">
-          {viewportDialogState.viewportId === viewportId && (
-            <Notification
-              id="viewport-notification"
-              message={viewportDialogState.message}
-              type={viewportDialogState.type}
-              actions={viewportDialogState.actions}
-              onSubmit={viewportDialogState.onSubmit}
-              onOutsideClick={viewportDialogState.onOutsideClick}
-              onKeyPress={viewportDialogState.onKeyPress}
-            />
-          )}
-        </div>
-        {/* The OHIFViewportActionCorners follows the viewport in the DOM so that it is naturally at a higher z-index.*/}
-        <OHIFViewportActionCorners viewportId={viewportId} />
-      </React.Fragment>
     );
   },
   areEqual

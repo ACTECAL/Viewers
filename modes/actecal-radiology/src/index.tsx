@@ -295,6 +295,7 @@ export const toolbarSections = {
     'UltrasoundDirectionalTool',
     'WindowLevelRegion',
     'SegmentLabelTool',
+    'Fullscreen',
   ],
 };
 
