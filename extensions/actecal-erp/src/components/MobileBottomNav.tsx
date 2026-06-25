@@ -41,6 +41,7 @@ function MobileBottomNav() {
 
   // We only want to render this on mobile screens in portrait mode
   const [isMobile, setIsMobile] = useState(checkIsMobile());
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(checkIsMobile());
@@ -52,8 +53,56 @@ function MobileBottomNav() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
   // Ensure all hooks run by NOT returning early here.
   const handleToolSelect = (toolId) => {
+    if (toolId === 'Reset') {
+      commandsManager.runCommand('resetViewport');
+      setIsToolsOpen(false);
+      return;
+    }
+    
+    if (toolId === 'Fullscreen') {
+      commandsManager.runCommand('toggleFullscreen');
+      setIsToolsOpen(false);
+      return;
+    }
+
+    if (toolId === 'MPR') {
+      commandsManager.runCommand('toggleHangingProtocol', { protocolId: 'mpr' });
+      setIsToolsOpen(false);
+      return;
+    }
+
+    if (toolId === 'Invert') {
+      commandsManager.runCommand('invertWindowLevel');
+      setIsToolsOpen(false);
+      return;
+    }
+
+    if (toolId === 'FlipHorizontal') {
+      commandsManager.runCommand('flipViewportHorizontal');
+      setIsToolsOpen(false);
+      return;
+    }
+
+    if (toolId === 'RotateRight') {
+      commandsManager.runCommand('rotateViewportCW');
+      setIsToolsOpen(false);
+      return;
+    }
+
     commandsManager.runCommand('setToolActive', { toolName: toolId });
     
     // Force touch bindings for mobile measurements
@@ -491,22 +540,29 @@ function MobileBottomNav() {
           </div>
           <div className="grid grid-cols-4 gap-3 max-h-[50vh] overflow-y-auto">
             {[
-              { id: 'Zoom', label: 'Zoom' },
-              { id: 'Pan', label: 'Pan' },
-              { id: 'WindowLevel', label: 'W/L' },
-              { id: 'Length', label: 'Length' },
-              { id: 'Bidirectional', label: 'Bidirectional' },
-              { id: 'ArrowAnnotate', label: 'Arrow' },
-              { id: 'EllipticalROI', label: 'Ellipse' },
-              { id: 'RectangleROI', label: 'Rectangle' },
-              { id: 'Angle', label: 'Angle' },
-              { id: 'Reset', label: 'Reset' }
+              { id: 'StackScroll', label: 'Scroll', icon: '↕️' },
+              { id: 'Zoom', label: 'Zoom', icon: '🔍' },
+              { id: 'Pan', label: 'Pan', icon: '✋' },
+              { id: 'WindowLevel', label: 'W/L', icon: '◐' },
+              { id: 'Length', label: 'Length', icon: '📏' },
+              { id: 'Bidirectional', label: 'Bi-Dir', icon: '✛' },
+              { id: 'ArrowAnnotate', label: 'Arrow', icon: '↗️' },
+              { id: 'EllipticalROI', label: 'Ellipse', icon: '⭕' },
+              { id: 'RectangleROI', label: 'Rect', icon: '⬜' },
+              { id: 'Angle', label: 'Angle', icon: '📐' },
+              { id: 'MPR', label: 'MPR', icon: '🧊' },
+              { id: 'Invert', label: 'Invert', icon: '◑' },
+              { id: 'FlipHorizontal', label: 'Flip', icon: '↔️' },
+              { id: 'RotateRight', label: 'Rotate', icon: '↻' },
+              { id: 'Reset', label: 'Reset View', icon: '🔄' },
+              { id: 'Fullscreen', label: isFullscreen ? 'Exit Full' : 'Fullscreen', icon: isFullscreen ? '✖️' : '🔲' }
             ].map(tool => (
               <button
                 key={tool.id}
                 onClick={() => handleToolSelect(tool.id)}
                 className="flex flex-col items-center justify-center p-2 rounded-lg bg-[#1e2235] text-gray-300 hover:bg-[#3a3f99]"
               >
+                <span className="text-xl mb-1">{tool.icon}</span>
                 <span className="text-[10px] text-center font-medium uppercase tracking-wider">{tool.label}</span>
               </button>
             ))}
