@@ -555,7 +555,7 @@ function MobileBottomNav() {
               { id: 'FlipHorizontal', label: 'Flip', icon: '↔️' },
               { id: 'RotateRight', label: 'Rotate', icon: '↻' },
               { id: 'Reset', label: 'Reset View', icon: '🔄' },
-              { id: 'Fullscreen', label: isFullscreen ? 'Exit Full' : 'Fullscreen', icon: isFullscreen ? '✖️' : '🔲' }
+              { id: 'Fullscreen', label: isFullscreen ? 'Exit Full Screen' : 'Full Screen', icon: isFullscreen ? '✖️' : '🔲' }
             ].map(tool => (
               <button
                 key={tool.id}
