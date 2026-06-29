@@ -43,6 +43,14 @@ const toolbarButtons: Button[] = [
       buttonSection: true,
     },
   },
+  {
+    id: 'Menu3D',
+    uiType: 'ohif.toolButtonList',
+    props: {
+      buttonSection: true,
+      icon: 'osirix-3d',
+    },
+  },
   // tool defs
   {
     id: 'modalityLoadBadge',
@@ -605,13 +613,93 @@ const toolbarButtons: Button[] = [
     id: 'MPR',
     uiType: 'ohif.toolButton',
     props: {
-      icon: 'icon-mpr',
+      icon: 'osirix-mpr',
       label: i18n.t('Buttons:MPR'),
       tooltip: i18n.t('Buttons:MPR'),
       commands: {
         commandName: 'toggleHangingProtocol',
         commandOptions: {
           protocolId: 'mpr',
+        },
+      },
+      evaluate: 'evaluate.displaySetIsReconstructable',
+    },
+  },
+  {
+    id: 'Volume3D',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'VolumeRendering',
+      label: i18n.t('Buttons:3D Viewer'),
+      tooltip: i18n.t('Buttons:3D Volume Rendering'),
+      commands: {
+        commandName: 'toggleHangingProtocol',
+        commandOptions: {
+          protocolId: 'only3D',
+        },
+      },
+      evaluate: 'evaluate.displaySetIsReconstructable',
+    },
+  },
+  {
+    id: '3DFourUp',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'layout-advanced-3d-four-up',
+      label: i18n.t('Buttons:3D Four Up'),
+      tooltip: i18n.t('Buttons:3D Four Up'),
+      commands: {
+        commandName: 'toggleHangingProtocol',
+        commandOptions: {
+          protocolId: 'fourUp',
+        },
+      },
+      evaluate: 'evaluate.displaySetIsReconstructable',
+    },
+  },
+  {
+    id: '3DMain',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'layout-advanced-3d-main',
+      label: i18n.t('Buttons:3D Main'),
+      tooltip: i18n.t('Buttons:3D Main'),
+      commands: {
+        commandName: 'toggleHangingProtocol',
+        commandOptions: {
+          protocolId: 'main3D',
+        },
+      },
+      evaluate: 'evaluate.displaySetIsReconstructable',
+    },
+  },
+  {
+    id: '3DOnly',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'layout-advanced-3d-only',
+      label: i18n.t('Buttons:3D Only'),
+      tooltip: i18n.t('Buttons:3D Only'),
+      commands: {
+        commandName: 'toggleHangingProtocol',
+        commandOptions: {
+          protocolId: 'only3D',
+        },
+      },
+      evaluate: 'evaluate.displaySetIsReconstructable',
+    },
+  },
+  {
+    id: '3DPrimary',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'layout-advanced-3d-primary',
+      label: i18n.t('Buttons:3D Primary'),
+      tooltip: i18n.t('Buttons:3D Primary'),
+      commands: {
+        commandName: 'toggleHangingProtocol',
+        commandOptions: {
+          protocolId: 'primary3D',
         },
       },
       evaluate: 'evaluate.displaySetIsReconstructable',

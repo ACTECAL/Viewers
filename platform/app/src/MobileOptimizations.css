@@ -118,55 +118,63 @@
      STUDY LIST (WORKLIST) MOBILE LAYOUT
   ========================================= */
   
-  /* Hide Study Date (3), Description (4), Accession (6) */
+  /* Hide Age (3), Status (5), Center (6), History (7), Report (9), Share (10), Actions (11) */
   /* 1. Header (InputGroup) */
   .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(3),
-  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(4),
-  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(6) {
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(5),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(6),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(7),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(9),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(10),
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(11) {
     display: none !important;
   }
 
   /* 2. Table Row Cells */
   tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(3),
-  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(4),
-  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(6) {
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(5),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(6),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(7),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(9),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(10),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(11) {
     display: none !important;
   }
 
   /* Adjust widths of remaining columns: 
-     Patient Name (1): 40%
-     MRN (2): 30%
-     Modality (5): 15%
-     Instances (7): 15% 
+     MRN (1): 30%
+     Patient Name (2): 40%
+     Images (4): 15%
+     Date (8): 15%
   */
   
-  /* Patient Name */
+  /* MRN */
   .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(1),
   tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(1) {
-    width: 40% !important;
-    max-width: 40% !important;
-    flex: 0 0 40% !important;
-  }
-
-  /* MRN */
-  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(2),
-  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(2) {
     width: 30% !important;
     max-width: 30% !important;
     flex: 0 0 30% !important;
   }
 
-  /* Modality */
-  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(5),
-  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(5) {
+  /* Patient Name */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(2),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(2) {
+    width: 40% !important;
+    max-width: 40% !important;
+    flex: 0 0 40% !important;
+  }
+
+  /* Images */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(4),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(4) {
     width: 15% !important;
     max-width: 15% !important;
     flex: 0 0 15% !important;
   }
 
-  /* Instances */
-  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(7),
-  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(7) {
+  /* Date */
+  .bg-primary-dark > .container > .flex.w-full.flex-row > div:nth-child(8),
+  tbody[data-cy="study-list-results"] > tr > td > div > table > tbody > tr[data-cy] > td:nth-child(8) {
     width: 15% !important;
     max-width: 15% !important;
     flex: 0 0 15% !important;

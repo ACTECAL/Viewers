@@ -82,6 +82,7 @@ export const actecal = {
   activeUsers: '@ohif/extension-actecal-erp.panelModule.activeUsers',
   notes: '@ohif/extension-actecal-erp.panelModule.notes',
   annotationFilters: '@ohif/extension-actecal-erp.panelModule.annotationFilters',
+  patientHistory: '@ohif/extension-actecal-erp.panelModule.patientHistory',
 };
 
 export const extensionDependencies = {
@@ -234,17 +235,19 @@ export const toolbarSections = {
     'Zoom',
     'StackScroll',
     'MeasurementTools',
-    'Crosshairs',
     'MPR',
+    'Menu3D',
+    'Crosshairs',
     'TrackballRotate',
     'invert',
     'Reset',
     'MoreTools',
     'Layout',
+    'orientationMenu',
     'Share',
   ],
 
-  [TOOLBAR_SECTIONS.viewportActionMenu.topLeft]: ['orientationMenu', 'dataOverlayMenu'],
+  [TOOLBAR_SECTIONS.viewportActionMenu.topLeft]: ['dataOverlayMenu'],
 
   [TOOLBAR_SECTIONS.viewportActionMenu.bottomMiddle]: ['AdvancedRenderingControls'],
 
@@ -274,6 +277,14 @@ export const toolbarSections = {
     'PlanarFreehandROI',
     'SplineROI',
     'LivewireContour',
+  ],
+
+  Menu3D: [
+    'Volume3D',
+    '3DMain',
+    '3DFourUp',
+    '3DPrimary',
+    '3DOnly',
   ],
 
   MoreTools: [
@@ -308,6 +319,7 @@ export const radiologyLayout = {
     rightPanels: [
       actecal.reportingPanel,
       actecal.aiAnalysisPanel,
+      actecal.patientHistory,
       actecal.activeUsers,
       actecal.notes,
       actecal.annotationFilters,

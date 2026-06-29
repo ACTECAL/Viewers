@@ -109,6 +109,24 @@ function MobileBottomNav() {
       return;
     }
 
+    if (toolId === '3DMain') {
+      commandsManager.runCommand('toggleHangingProtocol', { protocolId: 'main3D' });
+      setIsToolsOpen(false);
+      return;
+    }
+
+    if (toolId === '3DFourUp') {
+      commandsManager.runCommand('toggleHangingProtocol', { protocolId: 'fourUp' });
+      setIsToolsOpen(false);
+      return;
+    }
+
+    if (toolId === '3DOnly') {
+      commandsManager.runCommand('toggleHangingProtocol', { protocolId: 'only3D' });
+      setIsToolsOpen(false);
+      return;
+    }
+
     if (toolId === 'Invert') {
       commandsManager.runCommand('invertWindowLevel');
       setIsToolsOpen(false);
@@ -575,6 +593,9 @@ function MobileBottomNav() {
               { id: 'RectangleROI', label: 'Rect', icon: '⬜' },
               { id: 'Angle', label: 'Angle', icon: '📐' },
               { id: 'MPR', label: 'MPR', icon: '🧊' },
+              { id: '3DMain', label: '3D Main', icon: '📦' },
+              { id: '3DFourUp', label: '3D 4-Up', icon: '🗃️' },
+              { id: '3DOnly', label: '3D Only', icon: '🖥️' },
               { id: 'Invert', label: 'Invert', icon: '◑' },
               { id: 'FlipHorizontal', label: 'Flip', icon: '↔️' },
               { id: 'RotateRight', label: 'Rotate', icon: '↻' },

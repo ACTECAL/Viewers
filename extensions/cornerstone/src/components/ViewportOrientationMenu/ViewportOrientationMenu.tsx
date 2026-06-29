@@ -25,7 +25,7 @@ function ViewportOrientationMenu({
   const { servicesManager, commandsManager } = useSystem();
   const { cornerstoneViewportService, toolbarService } = servicesManager.services;
   const viewportInfo = cornerstoneViewportService.getViewportInfo(viewportId);
-  const viewportOrientation = viewportInfo.getOrientation();
+  const viewportOrientation = viewportInfo?.getOrientation?.() || 'axial';
 
   const [gridState] = useViewportGrid();
   const viewportIdToUse = viewportId || gridState.activeViewportId;

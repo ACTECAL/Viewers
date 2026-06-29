@@ -17,6 +17,12 @@ import StaticWadoClient from './utils/StaticWadoClient';
 import getDirectURL from '../utils/getDirectURL';
 import { fixBulkDataURI } from './utils/fixBulkDataURI';
 import {HeadersInterface} from '@ohif/core/src/types/RequestHeaders';
+import localforage from 'localforage';
+
+localforage.config({
+  name: 'ActecalViewer',
+  storeName: 'dicomMetadata',
+});
 
 const { DicomMetaDictionary, DicomDict } = dcmjs.data;
 
@@ -438,18 +444,29 @@ function createDicomWebApi(dicomWebConfig: DicomWebConfig, servicesManager) {
       sortFunction,
       madeInClient
     ) => {
-      const enableStudyLazyLoad = false;
-      wadoDicomWebClient.headers = generateWadoHeader(excludeTransferSyntax);
-      // data is all SOPInstanceUIDs
-      const data = await retrieveStudyMetadata(
-        wadoDicomWebClient,
-        StudyInstanceUID,
-        enableStudyLazyLoad,
-        filters,
-        sortCriteria,
-        sortFunction,
-        dicomWebConfig
-      );
+      const cacheKey = `metadata_sync_${StudyInstanceUID}`;
+      let data;
+      try {
+        data = await localforage.getItem(cacheKey);
+      } catch (e) {
+        console.warn('Failed to load from localforage', e);
+      }
+
+      if (!data) {
+        const enableStudyLazyLoad = false;
+        wadoDicomWebClient.headers = generateWadoHeader(excludeTransferSyntax);
+        // data is all SOPInstanceUIDs
+        data = await retrieveStudyMetadata(
+          wadoDicomWebClient,
+          StudyInstanceUID,
+          enableStudyLazyLoad,
+          filters,
+          sortCriteria,
+          sortFunction,
+          dicomWebConfig
+        );
+        localforage.setItem(cacheKey, data).catch(e => console.warn(e));
+      }
 
       // first naturalize the data
       const naturalizedInstancesMetadata = data.map(naturalizeDataset);
@@ -512,11 +529,31 @@ function createDicomWebApi(dicomWebConfig: DicomWebConfig, servicesManager) {
       madeInClient = false,
       returnPromises = false
     ) => {
-      const enableStudyLazyLoad = true;
-      wadoDicomWebClient.headers = generateWadoHeader(excludeTransferSyntax);
-      // Get Series
-      const { preLoadData: seriesSummaryMetadata, promises: seriesPromises } =
-        await retrieveStudyMetadata(
+      const cacheKey = `metadata_async_${StudyInstanceUID}`;
+      let cachedRaw = null;
+      try {
+        cachedRaw = await localforage.getItem(cacheKey);
+      } catch (e) {
+        console.warn('Failed to load from localforage', e);
+      }
+
+      let seriesSummaryMetadata, seriesPromises;
+
+      if (cachedRaw) {
+        seriesSummaryMetadata = cachedRaw.preLoadData;
+        seriesPromises = cachedRaw.seriesInstancesArray.map(instances => {
+           const resolvedPromise = Promise.resolve(instances);
+           return {
+              start: () => resolvedPromise,
+              then: (fn) => resolvedPromise.then(fn),
+              catch: (fn) => resolvedPromise.catch(fn)
+           };
+        });
+      } else {
+        const enableStudyLazyLoad = true;
+        wadoDicomWebClient.headers = generateWadoHeader(excludeTransferSyntax);
+        // Get Series
+        const result = await retrieveStudyMetadata(
           wadoDicomWebClient,
           StudyInstanceUID,
           enableStudyLazyLoad,
@@ -525,6 +562,14 @@ function createDicomWebApi(dicomWebConfig: DicomWebConfig, servicesManager) {
           sortFunction,
           dicomWebConfig
         );
+        seriesSummaryMetadata = result.preLoadData;
+        seriesPromises = result.promises;
+        
+        // Cache in background
+        Promise.all(seriesPromises.map(p => p.start ? p.start() : p)).then(allSeriesInstances => {
+           localforage.setItem(cacheKey, { preLoadData: seriesSummaryMetadata, seriesInstancesArray: allSeriesInstances }).catch(e => console.warn(e));
+        });
+      }
 
       /**
        * Adds the retrieve bulkdata function to naturalized DICOM data.

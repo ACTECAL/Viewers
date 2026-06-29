@@ -25,7 +25,7 @@ function initDefaultToolGroup(extensionManager, toolGroupService, commandsManage
       },
       {
         toolName: toolNames.Pan,
-        bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }],
+        bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }, { numTouchPoints: 3 }],
       },
       {
         toolName: toolNames.Zoom,
@@ -33,7 +33,7 @@ function initDefaultToolGroup(extensionManager, toolGroupService, commandsManage
       },
       {
         toolName: toolNames.StackScroll,
-        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 3 }],
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 1 }],
       },
     ],
     passive: [
@@ -185,7 +185,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
       },
       {
         toolName: toolNames.Pan,
-        bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }],
+        bindings: [{ mouseButton: Enums.MouseBindings.Auxiliary }, { numTouchPoints: 3 }],
       },
       {
         toolName: toolNames.Zoom,
@@ -193,7 +193,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
       },
       {
         toolName: toolNames.StackScroll,
-        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 3 }],
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }, { numTouchPoints: 1 }],
       },
     ],
     passive: [
@@ -237,7 +237,6 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
       },
     ],
     disabled: [
-      /*
       {
         toolName: toolNames.Crosshairs,
         bindings: [
@@ -270,7 +269,6 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
           },
         },
       },
-      */
       {
         toolName: toolNames.AdvancedMagnify,
       },
@@ -291,7 +289,7 @@ function initVolume3DToolGroup(extensionManager, toolGroupService) {
     active: [
       {
         toolName: toolNames.TrackballRotateTool,
-        bindings: [{ mouseButton: Enums.MouseBindings.Primary }],
+        bindings: [{ mouseButton: Enums.MouseBindings.Primary }, { numTouchPoints: 1 }],
       },
       {
         toolName: toolNames.Zoom,
