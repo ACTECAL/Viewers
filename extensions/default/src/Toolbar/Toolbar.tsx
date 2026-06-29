@@ -1,5 +1,6 @@
 import React from 'react';
 import { useToolbar } from '@ohif/core';
+import { useUIModeStore } from '../stores/useUIModeStore';
 
 /**
  * Props for the Toolbar component that renders a collection of toolbar buttons and/or button sections.
@@ -41,13 +42,21 @@ export function Toolbar({ buttonSection = 'primary', viewportId, location }: Too
     buttonSection,
   });
 
+  const { mode } = useUIModeStore();
+
   if (!toolbarButtons.length) {
     return null;
   }
 
+  // Filter tools for simple mode
+  const simpleModeAllowedIds = ['Zoom', 'Pan', 'WindowLevel', 'StackScroll', 'Length'];
+  const filteredButtons = mode === 'simple' 
+    ? toolbarButtons.filter(btn => btn && simpleModeAllowedIds.includes(btn.id))
+    : toolbarButtons;
+
   return (
     <>
-      {toolbarButtons?.map(toolDef => {
+      {filteredButtons?.map(toolDef => {
         if (!toolDef) {
           return null;
         }

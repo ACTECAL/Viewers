@@ -299,41 +299,19 @@ function WorkList({
       clickableCY: studyInstanceUid,
       row: [
         {
-          key: 'patientName',
-          content: patientName ? makeCopyTooltipCell(patientName) : null,
-          gridCol: 4,
-        },
-        {
           key: 'mrn',
           content: makeCopyTooltipCell(mrn),
+          gridCol: 2,
+        },
+        {
+          key: 'patientName',
+          content: patientName ? makeCopyTooltipCell(patientName) : null,
           gridCol: 3,
         },
         {
-          key: 'studyDate',
-          content: (
-            <>
-              {studyDate && <span className="mr-4">{studyDate}</span>}
-              {studyTime && <span>{studyTime}</span>}
-            </>
-          ),
-          title: `${studyDate || ''} ${studyTime || ''}`,
-          gridCol: 5,
-        },
-        {
-          key: 'description',
-          content: makeCopyTooltipCell(description),
-          gridCol: 4,
-        },
-        {
-          key: 'modality',
-          content: modalities,
-          title: modalities,
-          gridCol: 3,
-        },
-        {
-          key: 'accession',
-          content: makeCopyTooltipCell(accession),
-          gridCol: 3,
+          key: 'patientAge',
+          content: study.patientAge || 'NA',
+          gridCol: 2,
         },
         {
           key: 'instances',
@@ -350,6 +328,47 @@ function WorkList({
           ),
           title: (instances || 0).toString(),
           gridCol: 2,
+        },
+        {
+          key: 'status',
+          content: 'CREATED', // placeholder
+          gridCol: 3,
+        },
+        {
+          key: 'center',
+          content: 'NA', // placeholder
+          gridCol: 3,
+        },
+        {
+          key: 'history',
+          content: 'NA', // placeholder
+          gridCol: 3,
+        },
+        {
+          key: 'studyDate',
+          content: (
+            <div className="flex flex-col">
+              {studyDate && <span>{studyDate}</span>}
+              {studyTime && <span className="text-sm text-gray-400">{studyTime}</span>}
+            </div>
+          ),
+          title: `${studyDate || ''} ${studyTime || ''}`,
+          gridCol: 3,
+        },
+        {
+          key: 'report',
+          content: 'NA', // placeholder
+          gridCol: 1,
+        },
+        {
+          key: 'share',
+          content: 'NA', // placeholder
+          gridCol: 1,
+        },
+        {
+          key: 'actions',
+          content: <Icons.LaunchArrow className="w-5 text-primary-light hover:text-white" />,
+          gridCol: 1,
         },
       ],
       // Todo: This is actually running for all rows, even if they are
@@ -512,6 +531,34 @@ function WorkList({
       onClick: () => {
         navigate(`/logout?redirect_uri=${encodeURIComponent(window.location.href)}`);
       },
+    });
+  }
+
+  // @ts-ignore
+  if (window.electronAPI) {
+    menuOptions.push({
+      title: 'Toggle Cloud / Local Sync',
+      icon: 'cloud-download',
+      onClick: () => {
+        const currentSource = searchParams.get('datasource') || 'local-orthanc';
+        const newSource = currentSource === 'local-orthanc' ? 'cloud-server' : 'local-orthanc';
+        const search = qs.stringify({ ...queryFilterValues, datasource: newSource });
+        window.location.href = `/?${search}`;
+      }
+    });
+
+    menuOptions.push({
+      title: 'Set Local Storage Directory',
+      icon: 'folder',
+      onClick: async () => {
+        // @ts-ignore
+        const dir = await window.electronAPI.selectDirectory();
+        if (dir) {
+          // @ts-ignore
+          await window.electronAPI.setStorageDir(dir);
+          alert(`Storage directory set to ${dir}. Local server restarted.`);
+        }
+      }
     });
   }
 

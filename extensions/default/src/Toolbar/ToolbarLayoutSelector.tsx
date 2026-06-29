@@ -58,45 +58,10 @@ function ToolbarLayoutSelectorWithServices({
     ? advancedPresetsGenerator({ servicesManager })
     : [
         {
-          title: 'MPR',
-          icon: 'layout-three-col',
-          commandOptions: {
-            protocolId: 'mpr',
-          },
-        },
-        {
-          title: '3D four up',
-          icon: 'layout-four-up',
-          commandOptions: {
-            protocolId: '3d-four-up',
-          },
-        },
-        {
-          title: '3D main',
-          icon: 'layout-three-row',
-          commandOptions: {
-            protocolId: '3d-main',
-          },
-        },
-        {
           title: 'Axial Primary',
           icon: 'layout-side-by-side',
           commandOptions: {
             protocolId: 'axial-primary',
-          },
-        },
-        {
-          title: '3D only',
-          icon: 'layout-single',
-          commandOptions: {
-            protocolId: '3d-only',
-          },
-        },
-        {
-          title: '3D primary',
-          icon: 'layout-side-by-side',
-          commandOptions: {
-            protocolId: '3d-primary',
           },
         },
         {

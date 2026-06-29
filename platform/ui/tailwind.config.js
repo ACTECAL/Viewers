@@ -19,7 +19,7 @@ module.exports = {
     colors: {
       overlay: 'rgba(0, 0, 0, 0.8)',
       transparent: 'transparent',
-      black: '#000',
+      black: 'var(--ui-black, #000)',
       white: '#fff',
       initial: 'initial',
       inherit: 'inherit',
@@ -29,10 +29,10 @@ module.exports = {
       },
 
       primary: {
-        light: '#5acce6',
-        main: '#0D6EFD',
-        dark: '#1e1e1e', // Slate dark
-        active: '#0b5ed7',
+        light: 'var(--primary-light, #5acce6)',
+        main: 'var(--primary-main, #0D6EFD)',
+        dark: 'var(--primary-dark, #1e1e1e)', // Slate dark
+        active: 'var(--primary-active, #0b5ed7)',
       },
       inputfield: {
         main: '#3a3f99',
@@ -42,10 +42,10 @@ module.exports = {
       },
 
       secondary: {
-        light: '#3a3f99',
-        main: '#2b166b',
-        dark: '#2a2a2a', // Slate medium
-        active: '#1f1f27',
+        light: 'var(--secondary-light, #3a3f99)',
+        main: 'var(--secondary-main, #2b166b)',
+        dark: 'var(--secondary-dark, #2a2a2a)', // Slate medium
+        active: 'var(--secondary-active, #1f1f27)',
       },
 
       indigo: {
@@ -53,16 +53,16 @@ module.exports = {
       },
 
       common: {
-        bright: '#e1e1e1',
-        light: '#a19fad',
-        main: '#fff',
-        dark: '#726f7e',
-        active: '#2c3074',
+        bright: 'var(--common-bright, #e1e1e1)',
+        light: 'var(--common-light, #a19fad)',
+        main: 'var(--common-main, #fff)',
+        dark: 'var(--common-dark, #726f7e)',
+        active: 'var(--common-active, #2c3074)',
       },
       bkg: {
-        low: '#050615',
-        med: '#090C29',
-        full: '#041C4A',
+        low: 'var(--bkg-low, #050615)',
+        med: 'var(--bkg-med, #090C29)',
+        full: 'var(--bkg-full, #041C4A)',
       },
       info: {
         primary: '#FFFFFF',
@@ -79,16 +79,16 @@ module.exports = {
       },
 
       customblue: {
-        10: '#0A163F',
-        20: '#0B1F54',
-        30: '#09286e',
-        40: '#0E307F',
-        50: '#0F3A94',
-        80: '#1454D4',
-        100: '#c4fdff',
-        200: '#38daff',
-        300: '#1D204D',
-        400: '#90A0C1',
+        10: 'var(--customblue-10, #0A163F)',
+        20: 'var(--customblue-20, #0B1F54)',
+        30: 'var(--customblue-30, #09286e)',
+        40: 'var(--customblue-40, #0E307F)',
+        50: 'var(--customblue-50, #0F3A94)',
+        80: 'var(--customblue-80, #1454D4)',
+        100: 'var(--customblue-100, #c4fdff)',
+        200: 'var(--customblue-200, #38daff)',
+        300: 'var(--customblue-300, #1D204D)',
+        400: 'var(--customblue-400, #90A0C1)',
       },
 
       customgray: {

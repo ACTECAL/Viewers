@@ -10,6 +10,7 @@ import HeaderPatientInfo from './HeaderPatientInfo';
 import { PatientInfoVisibility } from './HeaderPatientInfo/HeaderPatientInfo';
 import { preserveQueryParameters } from '@ohif/app';
 import { Types } from '@ohif/core';
+import { useUIModeStore } from '../stores/useUIModeStore';
 
 const TIPS = [
   "Use [W] or [L] keys to quickly activate the Window/Level tool.",
@@ -20,30 +21,35 @@ const TIPS = [
 ];
 
 function ShortcutToast({ onClose, onShowPreferences }) {
-  const [tipIndex, setTipIndex] = useState(() => Math.floor(Math.random() * TIPS.length));
+  const [tipIndex] = useState(() => Math.floor(Math.random() * TIPS.length));
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onClose();
+    }, 5000); // Auto-hide after 5 seconds
+
+    return () => clearTimeout(timer);
+  }, [onClose]);
 
   return ReactDOM.createPortal(
-    <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999 }} className="bg-[#161c2d] text-white p-4 rounded-lg shadow-lg max-w-sm border border-[#3a3f99] flex flex-col gap-3">
+    <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999 }} className="bg-[#161c2d] text-white p-4 rounded-lg shadow-lg max-w-sm border border-[#3a3f99] flex flex-col gap-3 transition-opacity duration-500">
       <div className="flex justify-between items-center mb-1">
-        <h3 className="font-bold text-lg text-[#5b65d6]">Do you know?</h3>
+        <h3 className="font-bold text-lg text-[#5b65d6]">Shortcut Tip</h3>
         <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
           <Icons.ByName name="close" className="w-4 h-4" />
         </button>
       </div>
       <p className="text-sm font-light leading-relaxed">{TIPS[tipIndex]}</p>
-      <div className="flex flex-wrap gap-2 justify-between mt-3">
-        <Button size="sm" variant="ghost" className="text-gray-300 hover:text-white" onClick={() => setTipIndex((prev) => (prev + 1) % TIPS.length)}>
-          Next Tip
-        </Button>
-        <Button size="sm" variant="ghost" className="text-gray-300 hover:text-white" onClick={onShowPreferences}>
-          All Shortcuts
-        </Button>
-        <Button size="sm" variant="outlined" className="text-gray-300 hover:text-white border-gray-500" onClick={() => {
-          localStorage.setItem('hideShortcutToast', 'true');
-          onClose();
-        }}>
-          Don't Show Again
-        </Button>
+      <div className="flex justify-end mt-2">
+        <button 
+          onClick={() => {
+            localStorage.setItem('hideShortcutToast', 'true');
+            onClose();
+          }} 
+          className="text-xs text-gray-400 hover:text-white transition-colors"
+        >
+          Don't show this again
+        </button>
       </div>
     </div>,
     document.body
@@ -56,6 +62,7 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
 
   const navigate = useNavigate();
   const location = useLocation();
+  const { mode, setMode } = useUIModeStore();
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -80,6 +87,9 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
     const timer = setTimeout(() => {
       if (!localStorage.getItem('hideShortcutToast') && window.innerWidth > 1200) {
         setShowShortcutToast(true);
+        setTimeout(() => {
+          setShowShortcutToast(false);
+        }, 5000);
       }
     }, 2500);
 
@@ -163,6 +173,13 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
       onClick: () => {
         localStorage.removeItem('hideShortcutToast');
         setShowShortcutToast(true);
+      }
+    },
+    {
+      title: mode === 'simple' ? t('Header:Enable Diagnostic Mode') : t('Header:Enable Simple Mode'),
+      icon: 'settings',
+      onClick: () => {
+        setMode(mode === 'simple' ? 'diagnostic' : 'simple');
       }
     },
   ];

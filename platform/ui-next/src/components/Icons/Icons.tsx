@@ -799,6 +799,8 @@ export const Icons = {
   'helper-combine-intersect': (props: IconProps) => HelperCombineIntersect(props),
   'helper-combine-merge': (props: IconProps) => HelperCombineMerge(props),
   clipboard: (props: IconProps) => Clipboard(props),
+  'osirix-mpr': (props: IconProps) => <img src="/assets/osirix-mpr.png" alt="MPR" className={`w-full h-full object-contain ${props.className || ''}`} />,
+  'osirix-3d': (props: IconProps) => <img src="/assets/osirix-3d.png" alt="3D" className={`w-full h-full object-contain ${props.className || ''}`} />,
   Undo,
   Redo,
   JumpToSlice,

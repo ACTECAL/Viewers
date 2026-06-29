@@ -763,8 +763,7 @@ import AIAnalysisPanel from './components/AIAnalysisPanel';
 import ActiveUsersPanel from './components/ActiveUsersPanel';
 import CollaborativeNotesPanel from './components/CollaborativeNotesPanel';
 import AnnotationFiltersPanel from './components/AnnotationFiltersPanel';
-
-
+import PatientHistoryPanel from './components/PatientHistoryPanel';
 
 function getPanelModule({ commandsManager, extensionManager, servicesManager }) {
   return [
@@ -802,6 +801,13 @@ function getPanelModule({ commandsManager, extensionManager, servicesManager }) 
       iconLabel: 'Filters',
       label: 'Annotation Visibility',
       component: AnnotationFiltersPanel,
+    },
+    {
+      name: 'patientHistory',
+      iconName: 'tab-patient-info',
+      iconLabel: 'History',
+      label: 'Patient History',
+      component: PatientHistoryPanel,
     },
   ];
 }

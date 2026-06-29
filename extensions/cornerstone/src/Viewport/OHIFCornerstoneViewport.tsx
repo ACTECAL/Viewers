@@ -311,7 +311,7 @@ const OHIFCornerstoneViewport = React.memo(
     const Notification = customizationService.getCustomization('ui.notificationComponent');
 
     return (
-        <div className="viewport-wrapper" ref={resizeRef}>
+        <div className="viewport-wrapper h-full w-full flex-1" ref={resizeRef}>
           <div
             className="cornerstone-viewport-element"
             style={{ height: '100%', width: '100%' }}

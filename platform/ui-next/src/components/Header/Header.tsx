@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useState, useEffect } from 'react';
 import classNames from 'classnames';
 import {
   DropdownMenu,
@@ -51,6 +51,17 @@ function Header({
     }
   };
 
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   return (
     <IconPresentationProvider
       size="large"
@@ -75,7 +86,7 @@ function Header({
                 </svg>
               </div>
               <div className="flex flex-col justify-center ml-1">
-                <span className="text-[18px] font-bold text-white leading-none tracking-widest">SPECTRA</span>
+                <span className="text-[13px] font-bold text-white leading-none tracking-widest mt-1">SPECTRA</span>
               </div>
             </div>
 
@@ -97,8 +108,8 @@ function Header({
           
           <div className="absolute top-1/2 left-[250px] h-8 -translate-y-1/2 hidden md:block">{Secondary}</div>
           
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transform hidden md:block">
-            <div className="flex items-center justify-center space-x-2">{children}</div>
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transform">
+            <div className="flex items-center justify-center space-x-1 md:space-x-2">{children}</div>
           </div>
           
           <div className="absolute right-0 top-1/2 flex -translate-y-1/2 select-none items-center pr-2 md:pr-0">
@@ -113,6 +124,42 @@ function Header({
             </div>
             
             <div className="border-muted mx-1.5 h-[25px] border-r hidden md:block"></div>
+            
+            {/* Doctor Login Placeholder */}
+            {!isReturnEnabled && (
+              <div className="hidden md:flex items-center text-white mr-4 text-sm font-semibold">
+                 DR BHARAT GUPTA
+              </div>
+            )}
+
+            <div className="flex-shrink-0 hidden md:flex items-center mr-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                className="text-primary hover:bg-muted mt-2 h-full w-full"
+                title="Toggle Theme"
+              >
+                {theme === 'dark' ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinelinejoin="round" className="text-yellow-400">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinelinejoin="round" className="text-gray-800">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                  </svg>
+                )}
+              </Button>
+            </div>
+
             <div className="flex-shrink-0 hidden md:block">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -121,7 +168,7 @@ function Header({
                     size="icon"
                     className="text-primary hover:bg-muted mt-2 h-full w-full"
                   >
-                    <Icons.GearSettings />
+                    <Icons.ByName name="settings" className="w-5 h-5" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">

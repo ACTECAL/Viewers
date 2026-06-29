@@ -9,6 +9,7 @@
       "platform/ui",
       "platform/core",
       "platform/i18n",
+      "platform/electron",
       "extensions/*",
       "modes/*",
       "addOns/externals/*"
