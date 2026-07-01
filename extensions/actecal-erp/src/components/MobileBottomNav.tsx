@@ -478,14 +478,18 @@ function MobileBottomNav() {
              left: auto !important;
              width: 70px !important;
              height: 100vh !important;
+             height: 100dvh !important;
              flex-direction: column !important;
              border-top: none !important;
              border-left: 1px solid #3a3f99 !important;
              padding: 10px 0 !important;
+             overflow-y: auto !important;
+             overflow-x: hidden !important;
           }
           .mobile-nav-bar > button {
              width: 100% !important;
-             height: 20% !important;
+             min-height: 20% !important;
+             flex-shrink: 0 !important;
           }
           
           /* Sheets (Tools/Menu) slide from right instead of bottom */

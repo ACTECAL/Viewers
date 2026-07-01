@@ -74,6 +74,8 @@ export default async function init({
     rendering: {
       ...cornerstone.getConfiguration().rendering,
       strictZSpacingForVolumeViewport: appConfig.strictZSpacingForVolumeViewport,
+      preferSizeOverAccuracy: true,
+      useNorm16Texture: true,
     },
   });
 
