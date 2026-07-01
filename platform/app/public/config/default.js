@@ -22,7 +22,7 @@ window.config = {
   showCPUFallbackMessage: true,
   showLoadingIndicator: true,
   experimentalStudyBrowserSort: false,
-  strictZSpacingForVolumeViewport: true,
+  strictZSpacingForVolumeViewport: false,
   groupEnabledModesFirst: true,
   allowMultiSelectExport: false,
   maxNumRequests: {
