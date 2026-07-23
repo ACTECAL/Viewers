@@ -314,6 +314,23 @@ class ApiService {
     this.userId = userId;
   }
 
+  async getWorklist(userId = null) {
+    let url = `${this.baseUrl}/worklist`;
+    const queryUserId = userId || this.userId;
+
+    if (queryUserId) {
+      url += `?userId=${queryUserId}`;
+    }
+
+    return authFetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+
+
   async getGCPToken(studyInstanceUids) {
     const uids = Array.isArray(studyInstanceUids) ? studyInstanceUids.join(',') : studyInstanceUids;
     return authFetch(`${this.baseUrl}/gcp-token?uids=${uids}`, {
