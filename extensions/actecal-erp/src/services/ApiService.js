@@ -151,152 +151,157 @@ const API_BASE_URL = window.config.apiBaseUrl;
 const TENANT = window.config.tenant;
 
 // ────────────────────────────────────────────────
-// Global Refresh State (shared across fetch calls)
+// TEMP: Token refresh flow disabled (not needed now)
 // ────────────────────────────────────────────────
-let isRefreshing = false;
-let failedQueue = [];
+// // Global Refresh State (shared across fetch calls)
+// let isRefreshing = false;
+// let failedQueue = [];
 
-const processQueue = (error = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) prom.reject(error);
-    else prom.resolve();
-  });
-  failedQueue = [];
-};
+// const processQueue = (error = null) => {
+//   failedQueue.forEach((prom) => {
+//     if (error) prom.reject(error);
+//     else prom.resolve();
+//   });
+//   failedQueue = [];
+// };
 
-// ────────────────────────────────────────────────
-// Refresh Token + Permissions
-// ────────────────────────────────────────────────
-const refreshTokens = async () => {
-  if (isRefreshing) {
-    return new Promise((resolve, reject) => {
-      failedQueue.push({ resolve, reject });
-    });
-  }
+// // ────────────────────────────────────────────────
+// // Refresh Token + Permissions
+// // ────────────────────────────────────────────────
+// const refreshTokens = async () => {
+//   if (isRefreshing) {
+//     return new Promise((resolve, reject) => {
+//       failedQueue.push({ resolve, reject });
+//     });
+//   }
 
-  isRefreshing = true;
+//   isRefreshing = true;
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/${TENANT}/auth/token`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/${TENANT}/auth/token`, {
+//       method: 'POST',
+//       credentials: 'include',
+//       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+//     });
 
-    if (!response.ok) throw new Error('Refresh failed');
+//     if (!response.ok) throw new Error('Refresh failed');
 
-    // Fetch fresh permissions (same as your axios version)
-    await fetchAndStorePermissions();
+//     // Fetch fresh permissions (same as your axios version)
+//     await fetchAndStorePermissions();
 
-    processQueue();
-    return true;
-  } catch (err) {
-    processQueue(err);
-    throw err;
-  } finally {
-    isRefreshing = false;
-  }
-};
+//     processQueue();
+//     return true;
+//   } catch (err) {
+//     processQueue(err);
+//     throw err;
+//   } finally {
+//     isRefreshing = false;
+//   }
+// };
 
-// ────────────────────────────────────────────────
-// Fetch + Store Permissions (same as axios)
-// ────────────────────────────────────────────────
-const fetchAndStorePermissions = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/${TENANT}/auth/get-permission`, {
-      credentials: 'include',
-    });
+// // ────────────────────────────────────────────────
+// // Fetch + Store Permissions (same as axios)
+// // ────────────────────────────────────────────────
+// const fetchAndStorePermissions = async () => {
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/${TENANT}/auth/get-permission`, {
+//       credentials: 'include',
+//     });
 
-    const data = await response.json();
+//     const data = await response.json();
 
-    if (data?.permToken) {
-      const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
-      const updatedUser = {
-        ...currentUser,
-        permToken: data.permToken,
-        permission: data.permission || currentUser.permission,
-        userId: data.userId || currentUser.userId,
-      };
-      localStorage.setItem("user", JSON.stringify(updatedUser));
-    }
-  } catch (err) {
-    console.error("❌ Permission fetch failed:", err);
-  }
-};
+//     if (data?.permToken) {
+//       const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+//       const updatedUser = {
+//         ...currentUser,
+//         permToken: data.permToken,
+//         permission: data.permission || currentUser.permission,
+//         userId: data.userId || currentUser.userId,
+//       };
+//       localStorage.setItem("user", JSON.stringify(updatedUser));
+//     }
+//   } catch (err) {
+//     console.error("❌ Permission fetch failed:", err);
+//   }
+// };
 
-// ────────────────────────────────────────────────
-// Redirect to Login (Cognito) - Same as your axios code
-// ────────────────────────────────────────────────
-const redirectToLogin = () => {
-  const tenantName =
-    process.env.REACT_APP_ENV === "local"
-      ? "autolight"
-      : localStorage.getItem("tenantName") || "default";
+// // ────────────────────────────────────────────────
+// // Redirect to Login (Cognito) - Same as your axios code
+// // ────────────────────────────────────────────────
+// const redirectToLogin = () => {
+//   const tenantName =
+//     process.env.REACT_APP_ENV === "local"
+//       ? "autolight"
+//       : localStorage.getItem("tenantName") || "default";
 
-  const tenantConfig = JSON.parse(localStorage.getItem("tenantConfig") || "{}");
-  const cognitoDomain =
-    tenantConfig?.auth?.cognitoDomain ||
-    "https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com";
+//   const tenantConfig = JSON.parse(localStorage.getItem("tenantConfig") || "{}");
+//   const cognitoDomain =
+//     tenantConfig?.auth?.cognitoDomain ||
+//     "https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com";
 
-  const clientId = tenantConfig?.auth?.clientId;
-  const redirectUri = tenantConfig?.auth?.redirectUri;
+//   const clientId = tenantConfig?.auth?.clientId;
+//   const redirectUri = tenantConfig?.auth?.redirectUri;
 
-  const finalRedirectUri =
-    process.env.REACT_APP_ENV === "local"
-      ? "http://localhost:4000/erp/autolight/auth/cognito-callback"
-      : redirectUri;
+//   const finalRedirectUri =
+//     process.env.REACT_APP_ENV === "local"
+//       ? "http://localhost:4000/erp/autolight/auth/cognito-callback"
+//       : redirectUri;
 
-  if (clientId && finalRedirectUri) {
-    const loginUrl = `${cognitoDomain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${encodeURIComponent(
-      finalRedirectUri
-    )}&state=${encodeURIComponent(`tenant=${tenantName}`)}`;
-    window.location.href = loginUrl;
-  } else {
-    window.location.href = "/";
-  }
-};
+//   if (clientId && finalRedirectUri) {
+//     const loginUrl = `${cognitoDomain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${encodeURIComponent(
+//       finalRedirectUri
+//     )}&state=${encodeURIComponent(`tenant=${tenantName}`)}`;
+//     window.location.href = loginUrl;
+//   } else {
+//     window.location.href = "/";
+//   }
+// };
 
 // ────────────────────────────────────────────────
 // Enhanced Fetch with 401 Refresh Logic
 // ────────────────────────────────────────────────
 const authFetch = async (url, options = {}) => {
-  let response = await fetch(url, {
+  const response = await fetch(url, {
     ...options,
     credentials: 'include',
   });
 
-  // Handle 401
-  if (response.status === 401) {
-    const originalRequest = { url, options };
+  // ────────────────────────────────────────────────
+  // TEMP: Token/401 refresh logic disabled to avoid
+  // needing an authorized token (prevents 401 issues).
+  // ────────────────────────────────────────────────
+  // // Handle 401
+  // if (response.status === 401) {
+  //   const originalRequest = { url, options };
 
-    if (isRefreshing) {
-      // Wait for ongoing refresh
-      await new Promise((resolve, reject) => {
-        failedQueue.push({ resolve, reject });
-      });
-      // Retry after queue is processed
-      return authFetch(url, options);
-    }
+  //   if (isRefreshing) {
+  //     // Wait for ongoing refresh
+  //     await new Promise((resolve, reject) => {
+  //       failedQueue.push({ resolve, reject });
+  //     });
+  //     // Retry after queue is processed
+  //     return authFetch(url, options);
+  //   }
 
-    try {
-      await refreshTokens();
-      // Retry original request
-      response = await fetch(url, {
-        ...options,
-        credentials: 'include',
-      });
-    } catch (refreshError) {
-      console.error("[AUTH FETCH] Refresh failed → redirecting to login");
-      redirectToLogin();
-      throw refreshError;
-    }
-  }
+  //   try {
+  //     await refreshTokens();
+  //     // Retry original request
+  //     response = await fetch(url, {
+  //       ...options,
+  //       credentials: 'include',
+  //     });
+  //   } catch (refreshError) {
+  //     console.error("[AUTH FETCH] Refresh failed → redirecting to login");
+  //     redirectToLogin();
+  //     throw refreshError;
+  //   }
+  // }
 
-  // Handle 403
-  if (response.status === 403) {
-    window.location.href = "/access-denied";
-    throw new Error("Access Denied");
-  }
+  // // Handle 403
+  // if (response.status === 403) {
+  //   window.location.href = "/access-denied";
+  //   throw new Error("Access Denied");
+  // }
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
