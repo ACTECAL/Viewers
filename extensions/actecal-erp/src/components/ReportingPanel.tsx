@@ -29,8 +29,11 @@ import {
   $isRangeSelection,
   $getRoot,
   $createParagraphNode,
-  $createTextNode
+  $createTextNode,
+  $isElementNode,
+  CLEAR_EDITOR_COMMAND,
 } from 'lexical';
+import { $generateNodesFromDOM } from '@lexical/html';
 
 const theme = {
   paragraph: 'mb-2',
@@ -67,31 +70,104 @@ function InitialStatePlugin({ content, studyUid }: { content: string | null, stu
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    if (content !== null && !isInitialized) {
-      if (studyUid && editorStateCache.has(studyUid)) {
-        console.log('[InitialStatePlugin] Restoring from cache for studyUid:', studyUid);
-        try {
-          const savedState = editorStateCache.get(studyUid);
-          editor.setEditorState(savedState);
-          console.log('[InitialStatePlugin] Cache restored successfully.');
-        } catch (e) {
-          console.error('[InitialStatePlugin] Failed to restore cache:', e);
-        }
-      } else if (content) {
-        console.log('[InitialStatePlugin] Setting initial content.');
-        editor.update(() => {
-          const rootNode = $getRoot();
-          rootNode.clear();
-          const paragraphNode = $createParagraphNode();
-          const textNode = $createTextNode(content);
-          paragraphNode.append(textNode);
-          rootNode.append(paragraphNode);
-        });
-      } else {
-        console.log('[InitialStatePlugin] Empty content, doing nothing.');
+    if (content === null || isInitialized) return;
+
+    // 1. Restore from in-session cache if available (keeps unsaved edits across panel toggles)
+    if (studyUid && editorStateCache.has(studyUid)) {
+      console.log('[InitialStatePlugin] Restoring from cache for studyUid:', studyUid);
+      try {
+        const savedState = editorStateCache.get(studyUid);
+        editor.setEditorState(savedState);
+        console.log('[InitialStatePlugin] Cache restored successfully.');
+        setIsInitialized(true);
+        return;
+      } catch (e) {
+        console.error('[InitialStatePlugin] Failed to restore cache:', e);
       }
-      setIsInitialized(true);
     }
+
+    // 2. Empty content -> reset the editor to a blank state
+    if (!content || typeof content !== 'string' || content.trim() === '') {
+      editor.dispatchCommand(CLEAR_EDITOR_COMMAND, undefined);
+      setIsInitialized(true);
+      return;
+    }
+
+    // 3. Try to load as Lexical JSON (both bare editorState and wrapped { editorState: ... })
+    let loadedJSON = false;
+    let htmlFallbackValue = content;
+
+    try {
+      const parsed = JSON.parse(content);
+      let parsedObject = parsed;
+      // Unwrap { editorState: {...} } wrapper (like Lexical playground export)
+      if (parsed && typeof parsed === 'object' && parsed.editorState && !parsed.root) {
+        parsedObject = parsed.editorState;
+      }
+
+      if (parsedObject && typeof parsedObject === 'object' && parsedObject.root) {
+        try {
+          const state = editor.parseEditorState(JSON.stringify(parsedObject));
+          editor.setEditorState(state);
+          console.log('[InitialStatePlugin] Loaded Lexical JSON successfully.');
+          loadedJSON = true;
+        } catch (parseError) {
+          console.error('[InitialStatePlugin] parseEditorState failed:', parseError);
+        }
+      }
+    } catch (e) {
+      // Not valid JSON -> fall through to HTML/text loading
+    }
+
+    // 4. Fallback: load as HTML (or plain text) using $generateNodesFromDOM
+    if (!loadedJSON) {
+      editor.update(
+        () => {
+          try {
+            const parser = new DOMParser();
+            const dom = parser.parseFromString(htmlFallbackValue, 'text/html');
+            const nodesFromHtml = $generateNodesFromDOM(editor, dom);
+
+            const root = $getRoot();
+            root.clear();
+
+            if (!nodesFromHtml || nodesFromHtml.length === 0) {
+              const p = $createParagraphNode();
+              p.append($createTextNode(''));
+              root.append(p);
+            } else {
+              let currentParagraph = null;
+              for (const node of nodesFromHtml) {
+                if ($isElementNode(node)) {
+                  currentParagraph = null;
+                  root.append(node);
+                } else if (node.getType() === 'text' || node.getType() === 'link') {
+                  if (!currentParagraph) {
+                    currentParagraph = $createParagraphNode();
+                    root.append(currentParagraph);
+                  }
+                  currentParagraph.append(node);
+                } else {
+                  root.append(node);
+                }
+              }
+            }
+            root.selectEnd();
+            console.log('[InitialStatePlugin] Loaded as HTML fallback successfully.');
+          } catch (err) {
+            console.error('[InitialStatePlugin] Failed to load HTML content:', err);
+            const root = $getRoot();
+            root.clear();
+            const p = $createParagraphNode();
+            p.append($createTextNode(String(htmlFallbackValue)));
+            root.append(p);
+          }
+        },
+        { discrete: true },
+      );
+    }
+
+    setIsInitialized(true);
   }, [content, studyUid, editor, isInitialized]);
   return null;
 }
@@ -293,9 +369,99 @@ function ToolbarPlugin({ isExpanded }) {
     }
   };
 
+  const recognitionRef = useRef<any>(null);
+  const interimTranscriptRef = useRef('');
+
+  // Set up (and clean up) the Web Speech API recognition instance once per editor
+  useEffect(() => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.warn('Speech Recognition not supported in this browser');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      interimTranscriptRef.current = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscriptRef.current += transcript;
+        }
+      }
+
+      if (finalTranscript.trim()) {
+        // Insert the dictation into the Lexical editor at the current selection
+        editor.update(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            selection.insertText(finalTranscript);
+          } else {
+            // No active selection -> append a new paragraph at the end
+            const root = $getRoot();
+            const lastParagraph = $createParagraphNode();
+            const textNode = $createTextNode(finalTranscript);
+            lastParagraph.append(textNode);
+            root.append(lastParagraph);
+          }
+        });
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      try {
+        recognition.abort();
+      } catch (_) {
+        /* noop */
+      }
+      recognitionRef.current = null;
+    };
+  }, [editor]);
+
   const handleMicClick = () => {
-    // Scaffold for actual voice integration
-    setIsRecording(!isRecording);
+    const recognition = recognitionRef.current;
+    if (!recognition) {
+      console.warn('Speech Recognition not available');
+      return;
+    }
+
+    if (isRecording) {
+      recognition.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    try {
+      // Make sure the editor has focus so dictation lands at the right place
+      const editable = document.querySelector('[data-lexical-editor="true"], .ActecalReportingEditor-root [contenteditable="true"], [contenteditable="true"]');
+      if (editable instanceof HTMLElement) editable.focus();
+      recognition.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+      setIsRecording(false);
+    }
   };
 
   const insertTable = () => {
