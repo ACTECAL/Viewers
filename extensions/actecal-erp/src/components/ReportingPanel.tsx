@@ -65,9 +65,105 @@ function onError(error: Error) {
   console.error(error);
 }
 
-function InitialStatePlugin({ content, studyUid }: { content: string | null, studyUid: string }) {
+function applyContentToEditor(editor, value) {
+  if (!value || typeof value !== 'string' || value.trim() === '') {
+    editor.dispatchCommand(CLEAR_EDITOR_COMMAND, undefined);
+    return;
+  }
+
+  // 1. Try to load as Lexical JSON (both bare editorState and wrapped { editorState: ... })
+  let loadedJSON = false;
+  let htmlFallbackValue = value;
+
+  try {
+    const parsed = JSON.parse(value);
+    let parsedObject = parsed;
+    // Unwrap { editorState: {...} } wrapper (like Lexical playground export)
+    if (parsed && typeof parsed === 'object' && parsed.editorState && !parsed.root) {
+      parsedObject = parsed.editorState;
+    }
+
+    if (parsedObject && typeof parsedObject === 'object' && parsedObject.root) {
+      try {
+        const state = editor.parseEditorState(JSON.stringify(parsedObject));
+        editor.setEditorState(state);
+        console.log('[InitialStatePlugin] Loaded Lexical JSON successfully.');
+        loadedJSON = true;
+      } catch (parseError) {
+        console.error('[InitialStatePlugin] parseEditorState failed:', parseError);
+      }
+    }
+  } catch (e) {
+    // Not valid JSON -> fall through to HTML/text loading
+  }
+
+  // 2. Fallback: load as HTML (or plain text) using $generateNodesFromDOM
+  if (!loadedJSON) {
+    editor.update(
+      () => {
+        try {
+          const parser = new DOMParser();
+          const dom = parser.parseFromString(htmlFallbackValue, 'text/html');
+          const nodesFromHtml = $generateNodesFromDOM(editor, dom);
+
+          const root = $getRoot();
+          root.clear();
+
+          if (!nodesFromHtml || nodesFromHtml.length === 0) {
+            const p = $createParagraphNode();
+            p.append($createTextNode(''));
+            root.append(p);
+          } else {
+            let currentParagraph = null;
+            for (const node of nodesFromHtml) {
+              if ($isElementNode(node)) {
+                currentParagraph = null;
+                root.append(node);
+              } else if (node.getType() === 'text' || node.getType() === 'link') {
+                if (!currentParagraph) {
+                  currentParagraph = $createParagraphNode();
+                  root.append(currentParagraph);
+                }
+                currentParagraph.append(node);
+              } else {
+                root.append(node);
+              }
+            }
+          }
+          root.selectEnd();
+          console.log('[InitialStatePlugin] Loaded as HTML fallback successfully.');
+        } catch (err) {
+          console.error('[InitialStatePlugin] Failed to load HTML content:', err);
+          const root = $getRoot();
+          root.clear();
+          const p = $createParagraphNode();
+          p.append($createTextNode(String(htmlFallbackValue)));
+          root.append(p);
+        }
+      },
+      { discrete: true },
+    );
+  }
+}
+
+function InitialStatePlugin({ content, studyUid, prefillContent }: { content: string | null, studyUid: string, prefillContent?: string | null }) {
   const [editor] = useLexicalComposerContext();
   const [isInitialized, setIsInitialized] = useState(false);
+  const lastPrefillRef = useRef<string | null>(null);
+
+  // Template prefill: when prefillContent changes to a non-null value, reload the editor
+  // (bypasses the one-time initialization so a template can replace existing content).
+  useEffect(() => {
+    if (prefillContent === null || typeof prefillContent !== 'string') return;
+    if (prefillContent === lastPrefillRef.current) return;
+    lastPrefillRef.current = prefillContent;
+    // Invalidate cache so the prefilled content is not shadowed on next open
+    if (studyUid) {
+      editorStateCache.delete(studyUid);
+    }
+    applyContentToEditor(editor, prefillContent);
+    setIsInitialized(true);
+  }, [prefillContent, editor, studyUid]);
 
   useEffect(() => {
     if (content === null || isInitialized) return;
@@ -93,80 +189,7 @@ function InitialStatePlugin({ content, studyUid }: { content: string | null, stu
       return;
     }
 
-    // 3. Try to load as Lexical JSON (both bare editorState and wrapped { editorState: ... })
-    let loadedJSON = false;
-    let htmlFallbackValue = content;
-
-    try {
-      const parsed = JSON.parse(content);
-      let parsedObject = parsed;
-      // Unwrap { editorState: {...} } wrapper (like Lexical playground export)
-      if (parsed && typeof parsed === 'object' && parsed.editorState && !parsed.root) {
-        parsedObject = parsed.editorState;
-      }
-
-      if (parsedObject && typeof parsedObject === 'object' && parsedObject.root) {
-        try {
-          const state = editor.parseEditorState(JSON.stringify(parsedObject));
-          editor.setEditorState(state);
-          console.log('[InitialStatePlugin] Loaded Lexical JSON successfully.');
-          loadedJSON = true;
-        } catch (parseError) {
-          console.error('[InitialStatePlugin] parseEditorState failed:', parseError);
-        }
-      }
-    } catch (e) {
-      // Not valid JSON -> fall through to HTML/text loading
-    }
-
-    // 4. Fallback: load as HTML (or plain text) using $generateNodesFromDOM
-    if (!loadedJSON) {
-      editor.update(
-        () => {
-          try {
-            const parser = new DOMParser();
-            const dom = parser.parseFromString(htmlFallbackValue, 'text/html');
-            const nodesFromHtml = $generateNodesFromDOM(editor, dom);
-
-            const root = $getRoot();
-            root.clear();
-
-            if (!nodesFromHtml || nodesFromHtml.length === 0) {
-              const p = $createParagraphNode();
-              p.append($createTextNode(''));
-              root.append(p);
-            } else {
-              let currentParagraph = null;
-              for (const node of nodesFromHtml) {
-                if ($isElementNode(node)) {
-                  currentParagraph = null;
-                  root.append(node);
-                } else if (node.getType() === 'text' || node.getType() === 'link') {
-                  if (!currentParagraph) {
-                    currentParagraph = $createParagraphNode();
-                    root.append(currentParagraph);
-                  }
-                  currentParagraph.append(node);
-                } else {
-                  root.append(node);
-                }
-              }
-            }
-            root.selectEnd();
-            console.log('[InitialStatePlugin] Loaded as HTML fallback successfully.');
-          } catch (err) {
-            console.error('[InitialStatePlugin] Failed to load HTML content:', err);
-            const root = $getRoot();
-            root.clear();
-            const p = $createParagraphNode();
-            p.append($createTextNode(String(htmlFallbackValue)));
-            root.append(p);
-          }
-        },
-        { discrete: true },
-      );
-    }
-
+    applyContentToEditor(editor, content);
     setIsInitialized(true);
   }, [content, studyUid, editor, isInitialized]);
   return null;
@@ -325,7 +348,7 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
   return null;
 }
 
-function ToolbarPlugin({ isExpanded }) {
+function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
   const [editor] = useLexicalComposerContext();
   const [isRecording, setIsRecording] = useState(false);
   const [blockType, setBlockType] = useState('paragraph');
@@ -369,100 +392,155 @@ function ToolbarPlugin({ isExpanded }) {
     }
   };
 
-  const recognitionRef = useRef<any>(null);
-  const interimTranscriptRef = useRef('');
+  // ── GCP audio recording (MediaRecorder) ─────────────────────────────
+  const mediaRecorderRef = useRef<any>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingConfigRef = useRef<any>(null);
+  const recordingChunkIndexRef = useRef(0);
 
-  // Set up (and clean up) the Web Speech API recognition instance once per editor
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      console.warn('Speech Recognition not supported in this browser');
-      return;
+  const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string) => {
+    const cfg = recordingConfigRef.current;
+    if (!blob || !cfg?.token || !cfg?.bucket || !cfg?.prefix) {
+      console.warn('Recording config missing, skipping GCP upload');
+      return false;
     }
+    try {
+      const fullName = `${cfg.prefix}/${fileName}`;
+      const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${cfg.bucket}/o?uploadType=media&name=${encodeURIComponent(fullName)}`;
+      const res = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.token}`,
+          'Content-Type': mimeType || blob.type,
+        },
+        body: blob,
+      });
+      if (!res.ok) throw new Error(`GCS upload failed: ${res.status}`);
+      console.log('Uploaded to GCP:', fullName);
+      return true;
+    } catch (err) {
+      console.error('Failed to upload to GCP:', err);
+      return false;
+    }
+  };
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+  const handleAudioChunk = async (blob: Blob, mimeType: string) => {
+    const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
+    const index = recordingChunkIndexRef.current;
+    recordingChunkIndexRef.current += 1;
+    await uploadToGcpPath(blob, `chunk_${index}.${ext}`, mimeType);
+  };
 
-    recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      interimTranscriptRef.current = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript + ' ';
-        } else {
-          interimTranscriptRef.current += transcript;
-        }
-      }
-
-      if (finalTranscript.trim()) {
-        // Insert the dictation into the Lexical editor at the current selection
-        editor.update(() => {
-          const selection = $getSelection();
-          if ($isRangeSelection(selection)) {
-            selection.insertText(finalTranscript);
-          } else {
-            // No active selection -> append a new paragraph at the end
-            const root = $getRoot();
-            const lastParagraph = $createParagraphNode();
-            const textNode = $createTextNode(finalTranscript);
-            lastParagraph.append(textNode);
-            root.append(lastParagraph);
-          }
-        });
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      setIsRecording(false);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
+  const handleStopRecording = async () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
       try {
-        recognition.abort();
+        recorder.stop();
       } catch (_) {
         /* noop */
       }
-      recognitionRef.current = null;
-    };
-  }, [editor]);
-
-  const handleMicClick = () => {
-    const recognition = recognitionRef.current;
-    if (!recognition) {
-      console.warn('Speech Recognition not available');
-      return;
     }
+    const mimeType = recorder?.mimeType || 'audio/webm';
+    const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
+    recordingChunksRef.current = [];
+    if (fullBlob.size > 0) {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
+      await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType);
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    recordingChunkIndexRef.current = 0;
+    setIsRecording(false);
+  };
 
+  const fetchRecordingConfig = async () => {
+    try {
+      const apiService = new ApiService();
+      const refId = (erpRefId || studyUid || 'unknown');
+      const res = await apiService.getRecordingConfig(refId);
+      const d = res?.data?.data;
+      if (d?.google_token && d?.bucket_details?.bucketName && d?.recording_path) {
+        recordingConfigRef.current = {
+          token: d.google_token,
+          bucket: d.bucket_details.bucketName,
+          prefix: d.recording_path,
+          visitId: d.visit_id || null,
+        };
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to fetch recording config:', err);
+    }
+    return false;
+  };
+
+  const handleMicClick = async () => {
     if (isRecording) {
-      recognition.stop();
-      setIsRecording(false);
+      await handleStopRecording();
       return;
     }
 
     try {
-      // Make sure the editor has focus so dictation lands at the right place
-      const editable = document.querySelector('[data-lexical-editor="true"], .ActecalReportingEditor-root [contenteditable="true"], [contenteditable="true"]');
-      if (editable instanceof HTMLElement) editable.focus();
-      recognition.start();
+      const ok = await fetchRecordingConfig();
+      if (!ok) {
+        console.warn('Could not get recording config from backend');
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : 'audio/mp4';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recordingChunksRef.current = [];
+      recordingChunkIndexRef.current = 0;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+          handleAudioChunk(event.data, mimeType);
+        }
+      };
+
+      recorder.onerror = (event: any) => {
+        console.error('MediaRecorder error:', event.error);
+        setIsRecording(false);
+      };
+
+      recorder.start(30000); // chunk every 30 seconds
       setIsRecording(true);
     } catch (err) {
-      console.error('Failed to start speech recognition:', err);
+      console.error('Failed to start audio recording:', err);
       setIsRecording(false);
     }
   };
+
+  // Cleanup recording (mic + stream) when the toolbar unmounts
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          recorder.stop();
+        } catch (_) {
+          /* noop */
+        }
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
 
   const insertTable = () => {
     const rows = prompt("Enter number of rows:", "3");
@@ -486,9 +564,9 @@ function ToolbarPlugin({ isExpanded }) {
             <button
               onClick={handleMicClick}
               className={`${buttonClass} ${isRecording ? 'bg-red-100 text-red-700 border-red-300 animate-pulse' : 'text-blue-600 font-bold border-blue-200 hover:bg-blue-50'} shrink-0`}
-              title="Start Voice Dictation"
+              title="Record audio and save to GCP"
             >
-              {isRecording ? '🛑 Rec...' : '🎤 Dictate'}
+              {isRecording ? '🛑 Rec...' : '🎤 Record'}
             </button>
 
             <div className="w-px h-5 bg-gray-300 mx-0.5 shrink-0"></div>
@@ -602,9 +680,9 @@ function ToolbarPlugin({ isExpanded }) {
           <button
             onClick={handleMicClick}
             className={`${buttonClass} ${isRecording ? 'bg-red-100 text-red-700 border-red-300 animate-pulse' : 'text-blue-600 font-bold border-blue-200 hover:bg-blue-50'}`}
-            title="Start Voice Dictation"
+            title="Record audio and save to GCP"
           >
-            {isRecording ? '🛑 Recording...' : '🎤 Dictate'}
+            {isRecording ? '🛑 Recording...' : '🎤 Record'}
           </button>
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
@@ -659,7 +737,52 @@ function ReportingPanel() {
   const [studyUid, setStudyUid] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
   const editorContainerRef = useRef(null);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [prefillContent, setPrefillContent] = useState<string | null>(null);
+  const [erpRefId, setErpRefId] = useState<string>('');
 
+  // Fetch available report templates from the backend (ERP get-templates)
+  useEffect(() => {
+    let cancelled = false;
+    const fetchTemplates = async () => {
+      try {
+        const apiService = new ApiService();
+        const res = await apiService.getTemplates(100, 1);
+        const list = res?.data?.data?.template || [];
+        if (!cancelled) setTemplates(list);
+      } catch (err) {
+        console.warn('Failed to fetch templates:', err);
+      }
+    };
+    fetchTemplates();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Template selection -> view-template -> fetch presigned URL -> prefill editor
+  const handleTemplateSelect = async (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    if (!templateId) {
+      setPrefillContent(null);
+      return;
+    }
+    try {
+      const apiService = new ApiService();
+      const res = await apiService.viewTemplate(templateId);
+      const downloadUrl = res?.data?.data?.url;
+      if (!downloadUrl) {
+        console.warn('Template has no content URL');
+        return;
+      }
+      const fetchRes = await fetch(downloadUrl);
+      const text = await fetchRes.text();
+      if (text) {
+        setPrefillContent(text);
+      }
+    } catch (err) {
+      console.error('Failed to load template content:', err);
+    }
+  };
 
 
   useEffect(() => {
@@ -678,6 +801,27 @@ function ReportingPanel() {
 
         // Fetching from API
         const apiService = new ApiService();
+
+        // Auto-fill: resolve study -> ref no + test/department -> matching
+        // template, and prefill the editor with that template's content.
+        try {
+          const tpl = await apiService.getAutoFillTemplate(studyInstanceUid);
+          if (tpl && (tpl.erpRefId || tpl.presignedUrl)) {
+            setErpRefId(tpl.erpRefId || '');
+            if (tpl.presignedUrl) {
+              const fileRes = await fetch(tpl.presignedUrl);
+              const text = await fileRes.text();
+              if (text) {
+                setDraftContent(''); // ensure editor mounts
+                setPrefillContent(text);
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Auto-fill template lookup failed', err);
+        }
+
         try {
           const response = await apiService.fetchDraftReport(studyInstanceUid);
           if (response && response.presignedUrl) {
@@ -728,13 +872,28 @@ function ReportingPanel() {
     <div className="flex flex-col h-full bg-primary-dark p-2 text-white relative">
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-lg font-bold">Create Report</h3>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="hidden xl:flex text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light items-center gap-1"
-          title={isExpanded ? "Collapse" : "Pop out Editor"}
-        >
-          {isExpanded ? '🗗 Collapse' : '⛶ Expand'}
-        </button>
+        <div className="flex items-center gap-1">
+          <select
+            value={selectedTemplateId}
+            onChange={(e) => handleTemplateSelect(e.target.value)}
+            className="text-xs bg-secondary-main border border-secondary-light rounded px-1 py-1 text-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[130px]"
+            title="Select a template to prefill the report"
+          >
+            <option value="">Templates</option>
+            {templates.map((t: any) => (
+              <option key={t.id} value={t.id}>
+                {t.department || t.test || `Template ${t.id}`}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="hidden xl:flex text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light items-center gap-1"
+            title={isExpanded ? "Collapse" : "Pop out Editor"}
+          >
+            {isExpanded ? '🗗 Collapse' : '⛶ Expand'}
+          </button>
+        </div>
       </div>
 
       {draftContent !== null ? (
@@ -763,7 +922,7 @@ function ReportingPanel() {
               onKeyUp={(e) => e.stopPropagation()}
               onKeyPress={(e) => e.stopPropagation()}
             >
-              <ToolbarPlugin isExpanded={isExpanded} />
+              <ToolbarPlugin isExpanded={isExpanded} studyUid={studyUid} erpRefId={erpRefId} />
               <div className="flex-1 relative overflow-y-auto bg-white text-black">
                 <RichTextPlugin
                   contentEditable={<ContentEditable className={`h-full w-full outline-none resize-none p-4 ${isExpanded ? 'text-lg leading-relaxed max-w-4xl mx-auto' : 'text-sm'}`} />}
@@ -775,7 +934,7 @@ function ReportingPanel() {
               <TablePlugin />
               <HistoryPlugin />
               <OnChangePlugin onChange={handleEditorChange} />
-              <InitialStatePlugin content={draftContent} studyUid={studyUid} />
+              <InitialStatePlugin content={draftContent} studyUid={studyUid} prefillContent={prefillContent} />
               <MeasurementInjectionPlugin />
               <SubmitReportPlugin studyUid={studyUid} />
             </div>

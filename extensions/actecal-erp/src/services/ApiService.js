@@ -383,6 +383,48 @@ class ApiService {
       body: JSON.stringify(data),
     });
   }
+
+  // ────────────────────────────────────────────────
+  // ERP HMS endpoints (templates + GCP recording)
+  // ────────────────────────────────────────────────
+  _hmsUrl() {
+    // HMS routes are mounted at /erp/:tenant/hms on the same server
+    return `${API_BASE_URL}/erp/${TENANT}/hms`;
+  }
+
+  async getTemplates(limit = 10, pagenumber = 1, departmentId = null) {
+    return authFetch(`${this._hmsUrl()}/get-templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit, pagenumber, department_id: departmentId }),
+    });
+  }
+
+  async viewTemplate(templateId) {
+    return authFetch(`${this._hmsUrl()}/view-template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template_id: templateId }),
+    });
+  }
+
+  async getDraftReport(studyInstanceUid) {
+    return authFetch(`${this.baseUrl}/get-draft-report?studyInstanceUid=${studyInstanceUid}`);
+  }
+
+  // Resolve study -> ref no + test/department -> matching report template.
+  // Returns { erpRefId, templateId, testId, departmentId, templateS3Key, presignedUrl }
+  async getAutoFillTemplate(studyInstanceUid) {
+    return authFetch(`${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`);
+  }
+
+  async getRecordingConfig(refId) {
+    return authFetch(`${this._hmsUrl()}/get-recording-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ receiptno: refId }),
+    });
+  }
 }
 
 export default ApiService;
