@@ -205,7 +205,7 @@ function MeasurementInjectionPlugin() {
 
       editor.update(() => {
         const root = $getRoot();
-        
+
         let textToAppend = 'Measurement added';
         // Try to intelligently parse OHIF measurement text
         if (measurement.displayText) {
@@ -268,7 +268,7 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
         if (!editorRoot) {
            throw new Error("Could not find editor DOM element");
         }
-        
+
         uiNotificationService.show({
           title: 'Generating PDF',
           message: 'Creating PDF version of your report...',
@@ -276,7 +276,7 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
         });
 
         const html2pdf = (await import('html2pdf.js')).default;
-        
+
         const pdfOpt = {
           margin:       10,
           filename:     'report.pdf',
@@ -284,7 +284,7 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
           html2canvas:  { scale: 2 },
           jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
         };
-        
+
         const pdfBlob = await html2pdf().set(pdfOpt).from(editorRoot).output('blob');
 
         uiNotificationService.show({
@@ -297,7 +297,7 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
         const apiService = new ApiService();
         const urls = await apiService.getSubmitReportUrls(studyUid);
         const { lexicalUploadUrl, pdfUploadUrl } = urls;
-        
+
         if (!lexicalUploadUrl || !pdfUploadUrl) {
            throw new Error("Backend did not provide valid upload URLs");
         }
@@ -785,33 +785,58 @@ function ReportingPanel() {
   };
 
 
+  // Track the active study: subscribe to viewport changes and update studyUid
+  // whenever a new/acactive study becomes visible (so auto-fill runs on open).
   useEffect(() => {
-    const fetchReport = async () => {
-      try {
+    const subscription = viewportGridService.subscribe(
+      viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
+      () => {
         const state = viewportGridService.getState();
         const activeViewport = state.viewports[state.activeViewportIndex];
-        const studyInstanceUid = activeViewport?.StudyInstanceUID;
+        const currentUid = activeViewport?.StudyInstanceUID;
 
-        if (!studyInstanceUid) {
-          setDraftContent('');
-          return;
+        if (currentUid && currentUid !== studyUid) {
+          setStudyUid(currentUid);
         }
+      }
+    );
 
-        setStudyUid(studyInstanceUid);
+    const state = viewportGridService.getState();
+    const activeViewport = state.viewports[state.activeViewportIndex];
+    const initialUid = activeViewport?.StudyInstanceUID;
+    if (initialUid) {
+      setStudyUid(initialUid);
+    }
 
-        // Fetching from API
+    return () => subscription.unsubscribe();
+  }, [viewportGridService, studyUid]);
+
+  // When the active study changes: auto-fill template (based on patient ref no
+  // + test) on open, and prefetch the GCP recording config keyed by ref id so
+  // recording can start instantly on the mic button.
+  useEffect(() => {
+    if (!studyUid) {
+      setDraftContent('');
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadStudyContent = async () => {
+      try {
         const apiService = new ApiService();
 
-        // Auto-fill: resolve study -> ref no + test/department -> matching
-        // template, and prefill the editor with that template's content.
+        // Auto-fill: resolve study -> ref no + test/department -> matching template
+        let erpRef = '';
         try {
-          const tpl = await apiService.getAutoFillTemplate(studyInstanceUid);
+          const tpl = await apiService.getAutoFillTemplate(studyUid);
           if (tpl && (tpl.erpRefId || tpl.presignedUrl)) {
-            setErpRefId(tpl.erpRefId || '');
+            erpRef = tpl.erpRefId || '';
+            if (!cancelled) setErpRefId(erpRef);
             if (tpl.presignedUrl) {
               const fileRes = await fetch(tpl.presignedUrl);
               const text = await fileRes.text();
-              if (text) {
+              if (text && !cancelled) {
                 setDraftContent(''); // ensure editor mounts
                 setPrefillContent(text);
                 return;
@@ -822,32 +847,40 @@ function ReportingPanel() {
           console.warn('Auto-fill template lookup failed', err);
         }
 
+        // Prefetch recording config with the patient's ref id (ready before start).
         try {
-          const response = await apiService.fetchDraftReport(studyInstanceUid);
+          await apiService.getRecordingConfig(erpRef || 'unknown');
+        } catch (err) {
+          console.warn('Recording config prefetch failed', err);
+        }
+
+        // Fallback: load any saved draft report content.
+        try {
+          const response = await apiService.fetchDraftReport(studyUid);
           if (response && response.presignedUrl) {
             const fileRes = await fetch(response.presignedUrl);
             const lexicalJson = await fileRes.json();
-            setDraftContent(JSON.stringify(lexicalJson));
+            if (!cancelled) setDraftContent(JSON.stringify(lexicalJson));
           } else if (response && response.text) {
-            setDraftContent(response.text);
+            if (!cancelled) setDraftContent(response.text);
           } else if (response && response.report) {
-            setDraftContent(response.report);
-          } else {
+            if (!cancelled) setDraftContent(response.report);
+          } else if (!cancelled) {
             setDraftContent('');
           }
         } catch (apiError) {
           console.warn('API fetch failed, falling back to default text', apiError);
-          setDraftContent('');
+          if (!cancelled) setDraftContent('');
         }
-
       } catch (error) {
-        console.error('Failed to load draft report', error);
-        setDraftContent('');
+        console.error('Failed to load report', error);
+        if (!cancelled) setDraftContent('');
       }
     };
 
-    fetchReport();
-  }, [viewportGridService]);
+    loadStudyContent();
+    return () => { cancelled = true; };
+  }, [studyUid]);
 
   const initialConfig = {
     namespace: 'ActecalReportingEditor',
