@@ -398,6 +398,12 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingConfigRef = useRef<any>(null);
   const recordingChunkIndexRef = useRef(0);
+  // Tracks which ref (erpRefId or studyUid) we already auto-started for, so
+  // recording begins once per study when the reporting panel opens.
+  const autoStartedForRef = useRef<string | null>(null);
+  // Webm/mp4 container header extracted from the first chunk, used to make
+  // every subsequent chunk a standalone playable file (same as erp-ui).
+  const containerHeaderRef = useRef<ArrayBuffer | null>(null);
 
   const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string) => {
     const cfg = recordingConfigRef.current;
@@ -426,10 +432,28 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
   };
 
   const handleAudioChunk = async (blob: Blob, mimeType: string) => {
+    let uploadBlob = blob;
+    try {
+      if (!containerHeaderRef.current) {
+        // First chunk carries the container header; extract it and keep the
+        // header-only portion for prepending to later chunks.
+        const buffer = await blob.arrayBuffer();
+        const headerEnd = extractContainerHeader(buffer, mimeType);
+        if (headerEnd !== null && headerEnd > 0 && headerEnd < buffer.byteLength) {
+          containerHeaderRef.current = buffer.slice(0, headerEnd);
+        }
+      } else {
+        // Prepend the saved header so every chunk is independently playable.
+        uploadBlob = await prependHeader(containerHeaderRef.current, blob, mimeType);
+      }
+    } catch (err) {
+      console.error('Failed to build standalone chunk, uploading raw:', err);
+      uploadBlob = blob;
+    }
     const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
     const index = recordingChunkIndexRef.current;
     recordingChunkIndexRef.current += 1;
-    await uploadToGcpPath(blob, `chunk_${index}.${ext}`, mimeType);
+    await uploadToGcpPath(uploadBlob, `chunk_${index}.${ext}`, mimeType);
   };
 
   const handleStopRecording = async () => {
@@ -463,7 +487,10 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
       const apiService = new ApiService();
       const refId = (erpRefId || studyUid || 'unknown');
       const res = await apiService.getRecordingConfig(refId);
-      const d = res?.data?.data;
+      // Backend sendResponse nests as { status, data: {...} }. Raw json (via
+      // authFetch) gives res.data = the config object; some callers also hold
+      // an axios-like { data: { data } } shape, so accept both.
+      const d = res?.data?.data || res?.data;
       if (d?.google_token && d?.bucket_details?.bucketName && d?.recording_path) {
         recordingConfigRef.current = {
           token: d.google_token,
@@ -479,16 +506,19 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     return false;
   };
 
-  const handleMicClick = async () => {
-    if (isRecording) {
-      await handleStopRecording();
+  // Shared recording start: fetches GCP config (keyed by ref id / receipt no),
+  // grabs the mic, and starts MediaRecorder with 30s chunks. Used both by the
+  // mic button and the auto-start on reporting-panel open.
+  const startRecording = async (opts?: { silent?: boolean }) => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       return;
     }
-
     try {
       const ok = await fetchRecordingConfig();
       if (!ok) {
-        console.warn('Could not get recording config from backend');
+        if (!opts?.silent) {
+          console.warn('Could not get recording config from backend');
+        }
         return;
       }
 
@@ -503,6 +533,7 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
 
       recordingChunksRef.current = [];
       recordingChunkIndexRef.current = 0;
+      containerHeaderRef.current = null;
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -518,11 +549,46 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
 
       recorder.start(30000); // chunk every 30 seconds
       setIsRecording(true);
+      if (!opts?.silent) {
+        console.log('Audio recording started (auto or manual)');
+      }
     } catch (err) {
-      console.error('Failed to start audio recording:', err);
+      if (!opts?.silent) {
+        console.error('Failed to start audio recording:', err);
+      }
       setIsRecording(false);
     }
   };
+
+  const handleMicClick = async () => {
+    if (isRecording) {
+      await handleStopRecording();
+      return;
+    }
+    await startRecording();
+  };
+
+  // Auto-start recording as soon as the patient's ref id (receipt no) is
+  // resolved for the opened study. Browser mic permission may prompt on the
+  // first attempt; if blocked it fails silently and the mic button still works.
+  useEffect(() => {
+    if (!erpRefId) return;
+
+    if (autoStartedForRef.current === erpRefId) return;
+    autoStartedForRef.current = erpRefId;
+
+    // Small delay so the editor + template auto-fill is ready first.
+    const t = setTimeout(() => {
+      // If still recording for a previous study, stop it before starting anew.
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        handleStopRecording().finally(() => startRecording({ silent: true }));
+      } else {
+        startRecording({ silent: true });
+      }
+    }, 800);
+
+    return () => clearTimeout(t);
+  }, [erpRefId]);
 
   // Cleanup recording (mic + stream) when the toolbar unmounts
   useEffect(() => {
@@ -730,6 +796,112 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
   );
 }
 
+// Read the study UID directly from the URL query params. On direct viewer
+// links (e.g. /viewer?StudyInstanceUIDs=...) the viewport grid service may not
+// be populated on mount, so this is the reliable source for auto-fill.
+// ─── Webm/mp4 header helpers (same as erp-ui RecordingWidget) ──────────
+// Extract the container header offset so each uploaded chunk is standalone.
+const readVint = (data: Uint8Array, offset: number) => {
+  const first = data[offset];
+  if (first === undefined || first === 0) return null;
+  let length = 1;
+  let mask = 0x80;
+  while (length <= 8 && !(first & mask)) {
+    length += 1;
+    mask >>= 1;
+  }
+  if (length > 8) return null;
+  let id = 0;
+  for (let i = 0; i < length; i += 1) id = id * 256 + data[offset + i];
+  let size = data[offset] & (mask - 1);
+  for (let i = 1; i < length; i += 1) size = size * 256 + data[offset + i];
+  return { length, id, size };
+};
+
+const extractWebmHeader = (buffer: ArrayBuffer) => {
+  const data = new Uint8Array(buffer);
+  const limit = data.length;
+  const readElement = (pos: number) => {
+    const vint = readVint(data, pos);
+    if (!vint) return null;
+    const isUnknownSize = vint.size === 2 ** (7 * vint.length) - 1;
+    return { ...vint, dataStart: pos + vint.length, isUnknownSize };
+  };
+  const findCluster = (from: number): number | null => {
+    let pos = from;
+    while (pos < limit) {
+      const element = readElement(pos);
+      if (!element) return null;
+      if (element.id === 0x1f43b675) return pos; // WEBM_CLUSTER_ID
+      if (element.isUnknownSize) return null;
+      const next = element.dataStart + element.size;
+      if (next <= pos) return null;
+      pos = next;
+    }
+    return null;
+  };
+  let pos = 0;
+  while (pos < limit) {
+    const element = readElement(pos);
+    if (!element) return null;
+    if (element.id === 0x18538067) return findCluster(element.dataStart); // SEGMENT
+    if (element.isUnknownSize) return null;
+    const next = element.dataStart + element.size;
+    if (next <= pos) return null;
+    pos = next;
+  }
+  return null;
+};
+
+const extractMp4Header = (buffer: ArrayBuffer) => {
+  const view = new DataView(buffer);
+  let offset = 0;
+  while (offset + 8 <= view.byteLength) {
+    const size = view.getUint32(offset);
+    const type = String.fromCharCode(
+      view.getUint8(offset + 4), view.getUint8(offset + 5),
+      view.getUint8(offset + 6), view.getUint8(offset + 7)
+    );
+    if (type === 'moof') return offset;
+    if (size < 8 || offset + size > view.byteLength) return null;
+    offset += size;
+  }
+  return null;
+};
+
+const extractContainerHeader = (buffer: ArrayBuffer, mimeType: string) => {
+  if (mimeType === 'audio/webm') return extractWebmHeader(buffer);
+  if (mimeType === 'audio/mp4') return extractMp4Header(buffer);
+  return null;
+};
+
+const prependHeader = async (
+  headerBuffer: ArrayBuffer,
+  chunkBlob: Blob,
+  mimeType: string
+) => {
+  const chunkBytes = new Uint8Array(await chunkBlob.arrayBuffer());
+  const merged = new Uint8Array(headerBuffer.byteLength + chunkBytes.byteLength);
+  merged.set(new Uint8Array(headerBuffer), 0);
+  merged.set(chunkBytes, headerBuffer.byteLength);
+  return new Blob([merged], { type: mimeType });
+};
+
+function getStudyUidFromUrl(): string {
+  try {
+    const params = new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : ''
+    );
+    const raw =
+      params.get('StudyInstanceUIDs') ||
+      params.get('StudyInstanceUID') ||
+      '';
+    return raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean)[0] || '';
+  } catch {
+    return '';
+  }
+}
+
 function ReportingPanel() {
   const { servicesManager, extensionManager, hotkeysManager } = useSystem();
   const { viewportGridService } = servicesManager.services;
@@ -741,6 +913,7 @@ function ReportingPanel() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [prefillContent, setPrefillContent] = useState<string | null>(null);
   const [erpRefId, setErpRefId] = useState<string>('');
+  const urlSeedAppliedRef = useRef(false);
 
   // Fetch available report templates from the backend (ERP get-templates)
   useEffect(() => {
@@ -749,7 +922,8 @@ function ReportingPanel() {
       try {
         const apiService = new ApiService();
         const res = await apiService.getTemplates(100, 1);
-        const list = res?.data?.data?.template || [];
+        const list =
+          res?.data?.data?.template || res?.data?.template || [];
         if (!cancelled) setTemplates(list);
       } catch (err) {
         console.warn('Failed to fetch templates:', err);
@@ -769,7 +943,7 @@ function ReportingPanel() {
     try {
       const apiService = new ApiService();
       const res = await apiService.viewTemplate(templateId);
-      const downloadUrl = res?.data?.data?.url;
+      const downloadUrl = res?.data?.data?.url || res?.data?.url;
       if (!downloadUrl) {
         console.warn('Template has no content URL');
         return;
@@ -785,11 +959,21 @@ function ReportingPanel() {
   };
 
 
-  // Track the active study: subscribe to viewport/grid changes and update
-  // studyUid whenever a new/active study becomes visible (so auto-fill runs on
-  // open). We listen to both active-viewport and grid-state events to cover
-  // the initial load as well as user-driven study switching.
+  // Track the active study: seed it from the URL (direct viewer links), then
+  // subscribe to viewport/grid changes to follow study switching. studyUid is
+  // the source for rendering + auto-fill, so the URL seed guarantees the panel
+  // opens with the correct study even before the grid service is populated.
   useEffect(() => {
+    // Initial seed from the URL query param. Only applied once on mount so it
+    // does not override later user-driven study switching.
+    if (!urlSeedAppliedRef.current) {
+      urlSeedAppliedRef.current = true;
+      const urlUid = getStudyUidFromUrl();
+      if (urlUid && urlUid !== studyUid) {
+        setStudyUid(urlUid);
+      }
+    }
+
     const { viewportGridService } = servicesManager.services;
 
     const resolveActiveStudy = () => {
