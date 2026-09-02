@@ -438,12 +438,42 @@ function WorkList({
               query.append('StudyInstanceUIDs', studyInstanceUid);
               preserveQueryParameters(query);
 
+              // Actecal custom launch: open the actecal-radiology viewer
+              // (/viewer) for the worklist's study-open button. The visible
+              // mode launcher is the longitudinal "Basic Viewer" mode, and the
+              // actecal-radiology mode itself is hidden; both should land on
+              // /viewer?StudyInstanceUIDs=...&userId=...&tenant=... (no
+              // datasource path segment), matching the ERP Receipt page.
+              const isActecalMode =
+                mode.routeName === 'viewer' ||
+                mode.displayName === 'Basic Viewer';
+              let modeLink: string;
+              if (isActecalMode) {
+                // userId is stored by App.tsx on load (from URL) and/or passed
+                // as ?userId=. tenant comes from appConfig (config default.js).
+                const urlParams = new URLSearchParams(window.location.search);
+                const userId =
+                  urlParams.get('userId') ||
+                  urlParams.get('userid') ||
+                  localStorage.getItem('actecal_userId') ||
+                  '';
+                const tenant =
+                  urlParams.get('tenant') ||
+                  appConfig.tenant ||
+                  'autolight';
+                if (userId) query.append('userId', userId);
+                if (tenant) query.append('tenant', tenant);
+                modeLink = `/viewer?${query.toString()}`;
+              } else {
+                modeLink = `${mode.routeName}${dataPath || ''}?${query.toString()}`;
+              }
+
               return (
                 mode.displayName && (
                   <Link
                     className={isValidMode ? '' : 'cursor-not-allowed'}
                     key={i}
-                    to={`${mode.routeName}${dataPath || ''}?${query.toString()}`}
+                    to={modeLink}
                     onClick={event => {
                       // In case any event bubbles up for an invalid mode, prevent the navigation.
                       // For example, the event bubbles up when the icon embedded in the disabled button is clicked.
