@@ -785,31 +785,36 @@ function ReportingPanel() {
   };
 
 
-  // Track the active study: subscribe to viewport changes and update studyUid
-  // whenever a new/acactive study becomes visible (so auto-fill runs on open).
+  // Track the active study: subscribe to viewport/grid changes and update
+  // studyUid whenever a new/active study becomes visible (so auto-fill runs on
+  // open). We listen to both active-viewport and grid-state events to cover
+  // the initial load as well as user-driven study switching.
   useEffect(() => {
-    const subscription = viewportGridService.subscribe(
-      viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
-      () => {
-        const state = viewportGridService.getState();
-        const activeViewport = state.viewports[state.activeViewportIndex];
-        const currentUid = activeViewport?.StudyInstanceUID;
+    const { viewportGridService } = servicesManager.services;
 
-        if (currentUid && currentUid !== studyUid) {
-          setStudyUid(currentUid);
-        }
+    const resolveActiveStudy = () => {
+      const state = viewportGridService.getState();
+      const activeViewport = state.viewports[state.activeViewportIndex];
+      const currentUid = activeViewport?.StudyInstanceUID;
+      if (currentUid && currentUid !== studyUid) {
+        setStudyUid(currentUid);
       }
+    };
+
+    const subActive = viewportGridService.subscribe(
+      viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
+      resolveActiveStudy
+    );
+    const subGrid = viewportGridService.subscribe(
+      viewportGridService.EVENTS.GRID_STATE_CHANGED,
+      resolveActiveStudy
     );
 
-    const state = viewportGridService.getState();
-    const activeViewport = state.viewports[state.activeViewportIndex];
-    const initialUid = activeViewport?.StudyInstanceUID;
-    if (initialUid) {
-      setStudyUid(initialUid);
-    }
+    // Read the current active study once on mount (covers initial load).
+    resolveActiveStudy();
 
-    return () => subscription.unsubscribe();
-  }, [viewportGridService, studyUid]);
+    return () => { subActive.unsubscribe(); subGrid.unsubscribe(); };
+  }, [servicesManager, studyUid]);
 
   // When the active study changes: auto-fill template (based on patient ref no
   // + test) on open, and prefetch the GCP recording config keyed by ref id so
@@ -847,11 +852,15 @@ function ReportingPanel() {
           console.warn('Auto-fill template lookup failed', err);
         }
 
-        // Prefetch recording config with the patient's ref id (ready before start).
-        try {
-          await apiService.getRecordingConfig(erpRef || 'unknown');
-        } catch (err) {
-          console.warn('Recording config prefetch failed', err);
+        // Prefetch GCP recording config keyed by the patient's ref id (receipt
+        // no); backend resolves the latest visit from it for the upload path.
+        // Recording itself starts on the mic button (browser mic policy).
+        if (erpRef) {
+          try {
+            await apiService.getRecordingConfig(erpRef);
+          } catch (err) {
+            console.warn('Recording config prefetch failed', err);
+          }
         }
 
         // Fallback: load any saved draft report content.
