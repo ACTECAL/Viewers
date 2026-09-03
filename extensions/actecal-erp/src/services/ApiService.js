@@ -413,9 +413,26 @@ class ApiService {
   }
 
   // Resolve study -> ref no + test/department -> matching report template.
-  // Returns { erpRefId, templateId, testId, departmentId, templateS3Key, presignedUrl }
+  // Returns { erpRefId, templateId, testId, departmentId, templateS3Key, presignedUrl,
+  //           patientName, abhaId, visitId }
   async getAutoFillTemplate(studyInstanceUid) {
     return authFetch(`${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`);
+  }
+
+  // Viewer submit equivalent of erp-ui Receipt.js onSubmit: backend uploads
+  // lexical + pdf to S3 and saves into test_reports via addTestReports, so the
+  // finalized report appears in erp exactly like a normal Receipt.js submit.
+  async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType }) {
+    return authFetch(`${this.baseUrl}/submit-report-erp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studyInstanceUid,
+        template,
+        pdfBase64,
+        reportType,
+      }),
+    });
   }
 
   async getRecordingConfig(refId) {

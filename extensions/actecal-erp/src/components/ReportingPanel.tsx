@@ -242,6 +242,19 @@ function MeasurementInjectionPlugin() {
   return null;
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(',')[1] || result;
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
   const [editor] = useLexicalComposerContext();
   const { servicesManager } = useSystem();
@@ -261,7 +274,6 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
         // 1. Extract JSON state
         const editorState = editor.getEditorState();
         const jsonState = editorState.toJSON();
-        const jsonBlob = new Blob([JSON.stringify(jsonState)], { type: 'application/json' });
 
         // 2. Generate PDF
         const editorRoot = document.querySelector('.ActecalReportingEditor-root') || document.querySelector('[data-lexical-editor]');
@@ -293,33 +305,18 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
           type: 'info',
         });
 
-        // 3. Get Presigned URLs
+        // 3. Submit via backend (erp-ui Receipt.js equivalent): backend uploads
+        //    lexical + pdf to S3 and saves into test_reports via addTestReports,
+        //    so the finalized report appears in erp identically.
         const apiService = new ApiService();
-        const urls = await apiService.getSubmitReportUrls(studyUid);
-        const { lexicalUploadUrl, pdfUploadUrl } = urls;
+        const pdfBase64 = await blobToBase64(pdfBlob);
 
-        if (!lexicalUploadUrl || !pdfUploadUrl) {
-           throw new Error("Backend did not provide valid upload URLs");
-        }
-
-        // 4. Upload JSON
-        const jsonUpload = fetch(lexicalUploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: jsonBlob
+        await apiService.submitReportViaERP({
+          studyInstanceUid: studyUid,
+          template: JSON.stringify(jsonState),
+          pdfBase64,
+          reportType: 'final',
         });
-
-        // 5. Upload PDF
-        const pdfUpload = fetch(pdfUploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/pdf' },
-          body: pdfBlob
-        });
-
-        await Promise.all([jsonUpload, pdfUpload]);
-
-        // 6. Confirm Submission
-        await apiService.confirmReportSubmission(studyUid);
 
         uiNotificationService.show({
           title: 'Report Submitted',
