@@ -402,14 +402,14 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
   // every subsequent chunk a standalone playable file (same as erp-ui).
   const containerHeaderRef = useRef<ArrayBuffer | null>(null);
 
-  const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string) => {
+  const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string, basePath?: string) => {
     const cfg = recordingConfigRef.current;
     if (!blob || !cfg?.token || !cfg?.bucket || !cfg?.prefix) {
       console.warn('Recording config missing, skipping GCP upload');
       return false;
     }
     try {
-      const fullName = `${cfg.prefix}/${fileName}`;
+      const fullName = `${basePath || cfg.prefix}/${fileName}`;
       const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${cfg.bucket}/o?uploadType=media&name=${encodeURIComponent(fullName)}`;
       const res = await fetch(uploadUrl, {
         method: 'POST',
@@ -468,7 +468,11 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     if (fullBlob.size > 0) {
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
-      await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType);
+      const cfg = recordingConfigRef.current;
+      // Complete recording goes to the erp-file-complete folder (a sibling of
+      // the chunk prefix derived from the recording_path returned by backend).
+      const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
+      await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase);
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -797,33 +801,53 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
 // links (e.g. /viewer?StudyInstanceUIDs=...) the viewport grid service may not
 // be populated on mount, so this is the reliable source for auto-fill.
 // ─── Webm/mp4 header helpers (same as erp-ui RecordingWidget) ──────────
-// Extract the container header offset so each uploaded chunk is standalone.
+// Correct EBML VINT parsing: the ID vint and the size vint are two separate
+// variable-length integers (ID first, then the size vint that follows it).
+// The erp-ui original lumped the size in with the ID bytes, which produced a
+// nonsense size and made extractWebmHeader fail -> only chunk_0 (which natively
+// carries the init segment) was playable.
 const readVint = (data: Uint8Array, offset: number) => {
+  if (offset >= data.length) return null;
   const first = data[offset];
   if (first === undefined || first === 0) return null;
-  let length = 1;
-  let mask = 0x80;
-  while (length <= 8 && !(first & mask)) {
-    length += 1;
-    mask >>= 1;
+
+  // ID vint length: leading set bit position encodes the byte count.
+  let idLength = 1;
+  let idMask = 0x80;
+  while (idLength <= 8 && !(first & idMask)) {
+    idLength += 1;
+    idMask >>= 1;
   }
-  if (length > 8) return null;
+  if (idLength > 8 || offset + idLength > data.length) return null;
+
   let id = 0;
-  for (let i = 0; i < length; i += 1) id = id * 256 + data[offset + i];
-  let size = data[offset] & (mask - 1);
-  for (let i = 1; i < length; i += 1) size = size * 256 + data[offset + i];
-  return { length, id, size };
+  for (let i = 0; i < idLength; i += 1) id = id * 256 + data[offset + i];
+
+  // Size vint starts right after the ID bytes.
+  const sizePos = offset + idLength;
+  if (sizePos >= data.length) return null;
+
+  let sizeLength = 1;
+  let sizeMask = 0x80;
+  while (sizeLength <= 8 && !(data[sizePos] & sizeMask)) {
+    sizeLength += 1;
+    sizeMask >>= 1;
+  }
+  if (sizeLength > 8 || sizePos + sizeLength > data.length) return null;
+
+  let size = data[sizePos] & (sizeMask - 1);
+  for (let i = 1; i < sizeLength; i += 1) size = size * 256 + data[sizePos + i];
+
+  const isUnknownSize = size === 2 ** (7 * sizeLength) - 1;
+
+  // dataStart = start of the content (after ID + size vint).
+  return { length: idLength, id, size, sizeLength, dataStart: sizePos + sizeLength, isUnknownSize };
 };
 
 const extractWebmHeader = (buffer: ArrayBuffer) => {
   const data = new Uint8Array(buffer);
   const limit = data.length;
-  const readElement = (pos: number) => {
-    const vint = readVint(data, pos);
-    if (!vint) return null;
-    const isUnknownSize = vint.size === 2 ** (7 * vint.length) - 1;
-    return { ...vint, dataStart: pos + vint.length, isUnknownSize };
-  };
+  const readElement = (pos: number) => readVint(data, pos);
   const findCluster = (from: number): number | null => {
     let pos = from;
     while (pos < limit) {
@@ -832,7 +856,7 @@ const extractWebmHeader = (buffer: ArrayBuffer) => {
       if (element.id === 0x1f43b675) return pos; // WEBM_CLUSTER_ID
       if (element.isUnknownSize) return null;
       const next = element.dataStart + element.size;
-      if (next <= pos) return null;
+      if (next <= pos || next > limit) return null;
       pos = next;
     }
     return null;
@@ -841,10 +865,13 @@ const extractWebmHeader = (buffer: ArrayBuffer) => {
   while (pos < limit) {
     const element = readElement(pos);
     if (!element) return null;
-    if (element.id === 0x18538067) return findCluster(element.dataStart); // SEGMENT
+    if (element.id === 0x18538067) {
+      // SEGMENT: descend into its children (Info, Tracks) to find the Cluster.
+      return findCluster(element.dataStart);
+    }
     if (element.isUnknownSize) return null;
     const next = element.dataStart + element.size;
-    if (next <= pos) return null;
+    if (next <= pos || next > limit) return null;
     pos = next;
   }
   return null;
@@ -910,6 +937,8 @@ function ReportingPanel() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [prefillContent, setPrefillContent] = useState<string | null>(null);
   const [erpRefId, setErpRefId] = useState<string>('');
+  const [patientHistory, setPatientHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const urlSeedAppliedRef = useRef(false);
 
   // Fetch available report templates from the backend (ERP get-templates)
@@ -1072,6 +1101,30 @@ function ReportingPanel() {
     return () => { cancelled = true; };
   }, [studyUid]);
 
+  // Load the current patient's past test reports (Patient History side panel).
+  useEffect(() => {
+    if (!studyUid) {
+      setPatientHistory([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadHistory = async () => {
+      try {
+        const apiService = new ApiService();
+        const res = await apiService.getPatientHistory(studyUid);
+        const list = res?.data || (Array.isArray(res) ? res : []);
+        if (!cancelled) setPatientHistory(Array.isArray(list) ? list : []);
+      } catch (err) {
+        console.warn('Patient history load failed', err);
+        if (!cancelled) setPatientHistory([]);
+      }
+    };
+
+    loadHistory();
+    return () => { cancelled = true; };
+  }, [studyUid]);
+
   const initialConfig = {
     namespace: 'ActecalReportingEditor',
     theme,
@@ -1116,9 +1169,18 @@ function ReportingPanel() {
           >
             {isExpanded ? '🗗 Collapse' : '⛶ Expand'}
           </button>
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="hidden xl:flex text-sm bg-secondary-main hover:bg-primary-main px-2 py-1 rounded transition-colors border border-secondary-light items-center gap-1"
+            title={showHistory ? "Hide Patient History" : "Show Patient History"}
+          >
+            {showHistory ? '🗕 Hide History' : '📋 Patient History'}
+          </button>
         </div>
       </div>
 
+      <div className="flex flex-1 min-h-0 gap-2">
+        <div className={`flex-1 min-w-0 flex flex-col`}>
       {draftContent !== null ? (
         <div className={`flex flex-col transition-all duration-300 ${
           isExpanded
@@ -1187,6 +1249,37 @@ function ReportingPanel() {
           Loading...
         </div>
       )}
+        </div>
+        {showHistory && (
+          <div className="w-72 shrink-0 bg-secondary-dark text-white rounded border border-secondary-light overflow-y-auto flex flex-col max-h-full">
+            <div className="flex justify-between items-center px-3 py-2 border-b border-secondary-light shrink-0">
+              <h4 className="text-sm font-bold">Patient History</h4>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="text-gray-400 hover:text-white text-sm px-1"
+                title="Close history"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-2">
+              {patientHistory.length === 0 ? (
+                <div className="text-xs text-gray-400 p-2">No past reports found for this patient.</div>
+              ) : (
+                <ul className="space-y-2">
+                  {patientHistory.map((item: any) => (
+                    <li key={item.reportId || item.erpRefId || item.createdDate} className="bg-secondary-main rounded p-2 border border-secondary-light">
+                      <div className="text-sm font-semibold">{item.testName || item.departmentName || item.patientName || 'Report'}</div>
+                      <div className="text-xs text-gray-400">{item.testName && item.departmentName && item.departmentName !== item.testName ? `Dept: ${item.departmentName}` : ''}</div>
+                      <div className="text-xs text-gray-400 mt-1">{(item.reportType || 'report').toUpperCase()} • {item.createdDate || ''}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Backdrop overlay when expanded */}
       {isExpanded && (

@@ -419,6 +419,12 @@ class ApiService {
     return authFetch(`${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`);
   }
 
+  // Current study's patient past test reports (test name, department, date).
+  // authFetch returns the raw json body -> history is at res.data.
+  async getPatientHistory(studyInstanceUid) {
+    return authFetch(`${this.baseUrl}/get-patient-history?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`);
+  }
+
   // Viewer submit equivalent of erp-ui Receipt.js onSubmit: backend uploads
   // lexical + pdf to S3 and saves into test_reports via addTestReports, so the
   // finalized report appears in erp exactly like a normal Receipt.js submit.
