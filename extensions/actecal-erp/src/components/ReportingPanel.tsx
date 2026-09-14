@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 import { useSystem } from '@ohif/core';
 import ApiService from '../services/ApiService';
+import useClinicalScribe from '../hooks/useClinicalScribe';
 
 // Lexical imports
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -345,10 +346,47 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
   return null;
 }
 
-function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
+function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, resolvedVisitId }) {
   const [editor] = useLexicalComposerContext();
   const [isRecording, setIsRecording] = useState(false);
   const [blockType, setBlockType] = useState('paragraph');
+
+  // ── Clinical Scribe (AI report polling) ─────────────────────────────
+  const editorInstanceRef = useRef(null);
+  editorInstanceRef.current = editor;
+  const [visitId, setVisitId] = useState('');
+  // Tenant used by the scribe API. In the standalone viewer neither
+  // window.config.tenant nor localStorage.tenantName may be set, so fall back to
+  // the URL ?tenant= param and ultimately the tenant embedded in the
+  // recording_path returned by get-recording-config (e.g. erp-files/autolight/...).
+  const [tenantName, setTenantName] = useState(
+    () =>
+      new URLSearchParams(window.location.search).get('tenant') ||
+      window.config?.tenant ||
+      localStorage.getItem('tenantName') ||
+      ''
+  );
+  // effective visitId: recording-config visit_id takes priority, then
+  // getAutoFillTemplate's visitId (falling back through either path).
+  const finalVisitId = visitId || resolvedVisitId || '';
+  const {
+    startScribeSync,
+    finalizeConsultation,
+  } = useClinicalScribe({
+    tenantName,
+    visitId: finalVisitId,
+    editorInstanceRef,
+  });
+
+  // The MediaRecorder callback is created once (inside startRecording) and, on
+  // its own, would keep capturing the scribe functions from the render where
+  // visitId was still ''. Kept in refs so every call always uses the latest
+  // instances bound to the current visitId.
+  const startScribeSyncRef = useRef(startScribeSync);
+  startScribeSyncRef.current = startScribeSync;
+  const finalizeConsultationRef = useRef(finalizeConsultation);
+  finalizeConsultationRef.current = finalizeConsultation;
+  const handleAudioChunkRef = useRef<(blob: Blob, mimeType: string) => void>(() => {});
 
   const formatHeading = (headingSize) => {
     editor.update(() => {
@@ -398,11 +436,21 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
   // Tracks which ref (erpRefId or studyUid) we already auto-started for, so
   // recording begins once per study when the reporting panel opens.
   const autoStartedForRef = useRef<string | null>(null);
+  // Which ref the GCP config in recordingConfigRef was fetched for, so a study
+  // switch clears the stale visit id and re-fetches for the new patient.
+  const recordingConfigForRefRef = useRef<string | null>(null);
+  // Scribes the AI report polling start that is scheduled 3s after the first
+  // chunk uploads, so a fast stop can cancel it (same behaviour as erp-ui).
+  const scribeSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether startScribeSync has already been scheduled for this
+  // recording session so it fires on the FIRST successful upload (any chunk)
+  // rather than being hard-gated on chunk_0 alone.
+  const scribeSyncScheduledRef = useRef(false);
   // Webm/mp4 container header extracted from the first chunk, used to make
   // every subsequent chunk a standalone playable file (same as erp-ui).
   const containerHeaderRef = useRef<ArrayBuffer | null>(null);
 
-  const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string, basePath?: string) => {
+  const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string, basePath?: string, metadata: Record<string, string> = {}) => {
     const cfg = recordingConfigRef.current;
     if (!blob || !cfg?.token || !cfg?.bucket || !cfg?.prefix) {
       console.warn('Recording config missing, skipping GCP upload');
@@ -411,12 +459,16 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     try {
       const fullName = `${basePath || cfg.prefix}/${fileName}`;
       const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${cfg.bucket}/o?uploadType=media&name=${encodeURIComponent(fullName)}`;
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${cfg.token}`,
+        'Content-Type': mimeType || blob.type,
+      };
+      Object.entries(metadata).forEach(([key, value]) => {
+        headers[key] = value;
+      });
       const res = await fetch(uploadUrl, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          'Content-Type': mimeType || blob.type,
-        },
+        headers,
         body: blob,
       });
       if (!res.ok) throw new Error(`GCS upload failed: ${res.status}`);
@@ -450,29 +502,65 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
     const index = recordingChunkIndexRef.current;
     recordingChunkIndexRef.current += 1;
-    await uploadToGcpPath(uploadBlob, `chunk_${index}.${ext}`, mimeType);
+    const meta = index === 0
+      ? {
+          'x-goog-meta-department': department || '',
+          'x-goog-meta-test_type': testType || '',
+        }
+      : {};
+    const ok = await uploadToGcpPath(uploadBlob, `chunk_${index}.${ext}`, mimeType, undefined, meta);
+    console.log('[scribe] chunk', index, 'upload ok=', ok);
+    if (ok && !scribeSyncScheduledRef.current) {
+      scribeSyncScheduledRef.current = true;
+      if (scribeSyncTimerRef.current) clearTimeout(scribeSyncTimerRef.current);
+      console.log('[scribe] scheduling startScribeSync in 3s');
+      scribeSyncTimerRef.current = setTimeout(() => {
+        const started = startScribeSyncRef.current();
+        if (!started) {
+          // visitId/tenantName may have arrived late — retry once after 5s.
+          console.log('[scribe] startScribeSync returned false, retrying in 5s');
+          scribeSyncTimerRef.current = setTimeout(() => startScribeSyncRef.current(), 5000);
+        }
+      }, 3000);
+    }
   };
+  handleAudioChunkRef.current = handleAudioChunk;
 
   const handleStopRecording = async () => {
     const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      try {
-        recorder.stop();
-      } catch (_) {
-        /* noop */
+    // Await the recorder's onstop so the final ondataavailable chunk (sent by
+    // the browser before the stop event) is captured before we build the
+    // complete blob and call finalize.
+    try {
+      if (recorder && recorder.state !== 'inactive') {
+        await new Promise((resolve) => {
+          const prevOnstop = recorder.onstop;
+          recorder.onstop = () => { try { prevOnstop?.(); } catch (_) { /* noop */ } resolve(undefined); };
+          try {
+            recorder.stop();
+          } catch (_) {
+            resolve(undefined);
+          }
+        });
       }
+    } catch (err) {
+      console.warn('[scribe] handleStopRecording: recorder.stop() threw', err);
     }
     const mimeType = recorder?.mimeType || 'audio/webm';
     const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
     recordingChunksRef.current = [];
-    if (fullBlob.size > 0) {
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
-      const cfg = recordingConfigRef.current;
-      // Complete recording goes to the erp-file-complete folder (a sibling of
-      // the chunk prefix derived from the recording_path returned by backend).
-      const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
-      await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase);
+    try {
+      if (fullBlob.size > 0) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
+        const cfg = recordingConfigRef.current;
+        // Complete recording goes to the erp-file-complete folder (a sibling of
+        // the chunk prefix derived from the recording_path returned by backend).
+        const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
+        await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase);
+      }
+    } catch (err) {
+      console.error('[scribe] Failed to upload complete recording:', err);
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -481,6 +569,16 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     mediaRecorderRef.current = null;
     recordingChunkIndexRef.current = 0;
     setIsRecording(false);
+    if (scribeSyncTimerRef.current) {
+      clearTimeout(scribeSyncTimerRef.current);
+      scribeSyncTimerRef.current = null;
+    }
+    console.log('[scribe] handleStopRecording -> finalizeConsultationRef.current({ applyLexical: true })');
+    try {
+      await finalizeConsultationRef.current({ applyLexical: true });
+    } catch (err) {
+      console.error('[scribe] finalizeConsultation threw:', err);
+    }
   };
 
   const fetchRecordingConfig = async () => {
@@ -492,18 +590,37 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
       // authFetch) gives res.data = the config object; some callers also hold
       // an axios-like { data: { data } } shape, so accept both.
       const d = res?.data?.data || res?.data;
+      console.log('[scribe] fetchRecordingConfig for refId=', refId, 'parsed d=', d);
       if (d?.google_token && d?.bucket_details?.bucketName && d?.recording_path) {
+        // Backend may return visit id under visit_id, visitId, or visitID.
+        // Accept all shapes and coerce to string for consistent comparison.
+        const rawVisitId = d?.visit_id || d?.visitId || d?.visitID;
+        const visitIdStr = rawVisitId != null && String(rawVisitId).trim() !== '' ? String(rawVisitId) : '';
+        // Tenant embedded in the recording_path (erp-files/<tenant>/...) wins,
+        // then the URL ?tenant= param, then config/localStorage.
+        const pathTenant = (d?.recording_path?.split('/') || [])[1];
+        const effectiveTenant =
+          pathTenant ||
+          new URLSearchParams(window.location.search).get('tenant') ||
+          window.config?.tenant ||
+          localStorage.getItem('tenantName') ||
+          '';
+        if (effectiveTenant) setTenantName(effectiveTenant);
         recordingConfigRef.current = {
           token: d.google_token,
           bucket: d.bucket_details.bucketName,
           prefix: d.recording_path,
-          visitId: d.visit_id || null,
+          visitId: visitIdStr || null,
+          tenant: effectiveTenant || null,
         };
+        recordingConfigForRefRef.current = refId;
+        setVisitId(visitIdStr);
         return true;
       }
     } catch (err) {
       console.error('Failed to fetch recording config:', err);
     }
+    console.warn('[scribe] fetchRecordingConfig FAILED for refId=', erpRefId || studyUid);
     return false;
   };
 
@@ -517,6 +634,7 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     try {
       const ok = await fetchRecordingConfig();
       if (!ok) {
+        console.warn('[scribe] startRecording aborted: no recording config', { silent: opts?.silent });
         if (!opts?.silent) {
           console.warn('Could not get recording config from backend');
         }
@@ -535,11 +653,12 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
       recordingChunksRef.current = [];
       recordingChunkIndexRef.current = 0;
       containerHeaderRef.current = null;
+      scribeSyncScheduledRef.current = false;
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           recordingChunksRef.current.push(event.data);
-          handleAudioChunk(event.data, mimeType);
+          handleAudioChunkRef.current(event.data, mimeType);
         }
       };
 
@@ -549,11 +668,13 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
       };
 
       recorder.start(30000); // chunk every 30 seconds
+      console.log('[scribe] MediaRecorder started, mimeType=', mimeType, 'chunk every 30s');
       setIsRecording(true);
       if (!opts?.silent) {
         console.log('Audio recording started (auto or manual)');
       }
     } catch (err) {
+      console.warn('[scribe] startRecording failed:', err, { silent: opts?.silent });
       if (!opts?.silent) {
         console.error('Failed to start audio recording:', err);
       }
@@ -569,17 +690,47 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     await startRecording();
   };
 
-  // Auto-start recording as soon as the patient's ref id (receipt no) is
-  // resolved for the opened study. Browser mic permission may prompt on the
-  // first attempt; if blocked it fails silently and the mic button still works.
+  // Prefetch GCP recording config as soon as the patient's ref id is resolved,
+  // so the visit id is known before recording starts (same as erp-ui where
+  // recording + AI polling are both keyed on recordingConfig.visitId).
   useEffect(() => {
     if (!erpRefId) return;
+
+    // Switching to a new study/ref: drop the previous patient's visit id and
+    // config so recording + polling re-key to the new patient's visit.
+    if (recordingConfigForRefRef.current !== erpRefId) {
+      recordingConfigRef.current = null;
+      recordingConfigForRefRef.current = null;
+      autoStartedForRef.current = null;
+      setVisitId('');
+      setTenantName('');
+    }
+
+    let cancelled = false;
+    fetchRecordingConfig().finally(() => {
+      if (!cancelled) {
+        setVisitId(recordingConfigRef.current?.visitId || '');
+      }
+    });
+    return () => { cancelled = true; };
+  }, [erpRefId]);
+
+  // Auto-start recording only once the ref id AND its visit id are resolved
+  // (same as erp-ui Receipt.js: patientData.receipt_no && recordingConfig.visitId
+  // && isAiListening). Browser mic permission may prompt; if blocked it fails
+  // silently and the mic button still works.
+  useEffect(() => {
+    if (!erpRefId || !finalVisitId) {
+      console.log('[scribe] auto-start skip:', { erpRefId, finalVisitId });
+      return;
+    }
 
     if (autoStartedForRef.current === erpRefId) return;
     autoStartedForRef.current = erpRefId;
 
     // Small delay so the editor + template auto-fill is ready first.
     const t = setTimeout(() => {
+      console.log('[scribe] auto-starting recording for', erpRefId, finalVisitId);
       // If still recording for a previous study, stop it before starting anew.
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         handleStopRecording().finally(() => startRecording({ silent: true }));
@@ -589,11 +740,15 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId }) {
     }, 800);
 
     return () => clearTimeout(t);
-  }, [erpRefId]);
+  }, [erpRefId, finalVisitId]);
 
   // Cleanup recording (mic + stream) when the toolbar unmounts
   useEffect(() => {
     return () => {
+      if (scribeSyncTimerRef.current) {
+        clearTimeout(scribeSyncTimerRef.current);
+        scribeSyncTimerRef.current = null;
+      }
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
         try {
@@ -844,37 +999,53 @@ const readVint = (data: Uint8Array, offset: number) => {
   return { length: idLength, id, size, sizeLength, dataStart: sizePos + sizeLength, isUnknownSize };
 };
 
-const extractWebmHeader = (buffer: ArrayBuffer) => {
-  const data = new Uint8Array(buffer);
+const WEBM_CLUSTER_ID = 0x1f43b675;
+const WEBM_TIMECODE_ID = 0xe7;
+const WEBM_CLUSTER_SIGNATURE = [0x1f, 0x43, 0xb6, 0x75];
+
+// Scans raw bytes for the Cluster element signature (0x1F 0x43 0xB6 0x75) and
+// keeps hits that parse as a Cluster whose first child is a Timecode element.
+// MediaRecorder timeslice blobs (especially after the first) often begin
+// mid-cluster / mid-block, so there is no valid EBML header to walk from —
+// signature scanning finds clusters regardless of where the blob starts.
+const findWebmClusters = (data: Uint8Array) => {
   const limit = data.length;
-  const readElement = (pos: number) => readVint(data, pos);
-  const findCluster = (from: number): number | null => {
-    let pos = from;
-    while (pos < limit) {
-      const element = readElement(pos);
-      if (!element) return null;
-      if (element.id === 0x1f43b675) return pos; // WEBM_CLUSTER_ID
-      if (element.isUnknownSize) return null;
-      const next = element.dataStart + element.size;
-      if (next <= pos || next > limit) return null;
-      pos = next;
-    }
-    return null;
-  };
+  const clusters: { offset: number; timecode: any }[] = [];
   let pos = 0;
-  while (pos < limit) {
-    const element = readElement(pos);
-    if (!element) return null;
-    if (element.id === 0x18538067) {
-      // SEGMENT: descend into its children (Info, Tracks) to find the Cluster.
-      return findCluster(element.dataStart);
+  while (pos + 4 <= limit) {
+    const rel = data.subarray(pos, limit).indexOf(WEBM_CLUSTER_SIGNATURE[0]);
+    if (rel === -1) break;
+    const cand = pos + rel;
+    if (
+      cand + 4 <= limit &&
+      data[cand + 1] === WEBM_CLUSTER_SIGNATURE[1] &&
+      data[cand + 2] === WEBM_CLUSTER_SIGNATURE[2] &&
+      data[cand + 3] === WEBM_CLUSTER_SIGNATURE[3]
+    ) {
+      const cluster = readVint(data, cand);
+      if (cluster && cluster.id === WEBM_CLUSTER_ID && cluster.dataStart < limit) {
+        const timecode = readVint(data, cluster.dataStart);
+        if (
+          timecode &&
+          timecode.id === WEBM_TIMECODE_ID &&
+          timecode.size >= 1 &&
+          timecode.size <= 8 &&
+          timecode.dataStart + timecode.size <= limit
+        ) {
+          clusters.push({ offset: cand, timecode });
+        }
+      }
+      pos = cand + 4;
+    } else {
+      pos = cand + 1;
     }
-    if (element.isUnknownSize) return null;
-    const next = element.dataStart + element.size;
-    if (next <= pos || next > limit) return null;
-    pos = next;
   }
-  return null;
+  return clusters;
+};
+
+const extractWebmHeader = (buffer: ArrayBuffer) => {
+  const clusters = findWebmClusters(new Uint8Array(buffer));
+  return clusters.length ? clusters[0].offset : null;
 };
 
 const extractMp4Header = (buffer: ArrayBuffer) => {
@@ -899,15 +1070,150 @@ const extractContainerHeader = (buffer: ArrayBuffer, mimeType: string) => {
   return null;
 };
 
+// ─── Timeline normalization helpers ──────────────────────────────────────────
+// Mid-stream chunks carry ABSOLUTE cluster timecodes (30s, 60s, ...). Prepending
+// the init header alone leaves chunk_1+ with a silent lead-in equal to the
+// original start time, so only chunk_0 sounds correct. We rewrite every webm
+// cluster timecode relative to the chunk's first cluster, and shift mp4 moof
+// fragments back by the first fragment's decode time, so each uploaded chunk
+// plays audio immediately from t=0.
+
+const readUint64BE = (view: DataView, offset: number) => {
+  const hi = view.getUint32(offset);
+  const lo = view.getUint32(offset + 4);
+  return hi * 2 ** 32 + lo;
+};
+
+const writeUint64BE = (view: DataView, offset: number, value: number) => {
+  view.setUint32(offset, Math.floor(value / 2 ** 32));
+  view.setUint32(offset + 4, value >>> 0);
+};
+
+const normalizeWebmTimecodes = (chunkBytes: Uint8Array) => {
+  const patch = new Uint8Array(chunkBytes);
+  const clusters = findWebmClusters(patch);
+  if (!clusters.length) {
+    return patch.slice(patch.byteOffset, patch.byteOffset + patch.byteLength);
+  }
+
+  let baseTimecode: number | null = null;
+  for (const c of clusters) {
+    const tc = c.timecode;
+    let timecode = 0;
+    for (let i = 0; i < tc.size; i += 1) {
+      timecode = timecode * 256 + patch[tc.dataStart + i];
+    }
+    if (baseTimecode === null) baseTimecode = timecode;
+    let adjusted = timecode - baseTimecode;
+    for (let i = tc.size - 1; i >= 0; i -= 1) {
+      patch[tc.dataStart + i] = adjusted & 0xff;
+      adjusted = Math.floor(adjusted / 256);
+    }
+  }
+
+  return patch.slice(patch.byteOffset, patch.byteOffset + patch.byteLength);
+};
+
+const findBoxOffset = (view: DataView, start: number, end: number, type: string) => {
+  let offset = start;
+  while (offset + 8 <= end) {
+    const size = view.getUint32(offset);
+    if (size < 8) return -1;
+    if (
+      String.fromCharCode(
+        view.getUint8(offset + 4),
+        view.getUint8(offset + 5),
+        view.getUint8(offset + 6),
+        view.getUint8(offset + 7)
+      ) === type
+    ) {
+      return offset;
+    }
+    offset += size;
+  }
+  return -1;
+};
+
+const normalizeMp4Fragments = (chunkBytes: Uint8Array) => {
+  const limit = chunkBytes.length;
+  const patch = new Uint8Array(chunkBytes);
+  const view = new DataView(patch.buffer, patch.byteOffset, patch.byteLength);
+
+  let baseDecodeTime: number | null = null;
+  let offset = 0;
+  while (offset + 8 <= limit) {
+    const size = view.getUint32(offset);
+    if (size < 8 || offset + size > limit) return null;
+    const type = String.fromCharCode(
+      view.getUint8(offset + 4),
+      view.getUint8(offset + 5),
+      view.getUint8(offset + 6),
+      view.getUint8(offset + 7)
+    );
+    if (type === 'moof') {
+      const moofEnd = offset + size;
+      const trafPos = findBoxOffset(view, offset + 8, moofEnd, 'traf');
+      const tfdtPos =
+        trafPos >= 0
+          ? findBoxOffset(view, trafPos + 8, moofEnd, 'tfdt')
+          : -1;
+      if (tfdtPos >= 0) {
+        const version = view.getUint8(tfdtPos + 8);
+        const valuePos = tfdtPos + 12 + (version === 1 ? 4 : 0);
+        if (valuePos + (version === 1 ? 8 : 4) <= limit) {
+          const decodeTime =
+            version === 1
+              ? readUint64BE(view, valuePos)
+              : view.getUint32(valuePos);
+          if (baseDecodeTime === null) baseDecodeTime = decodeTime;
+          const adjusted = decodeTime - baseDecodeTime;
+          if (version === 1) {
+            writeUint64BE(view, valuePos, adjusted);
+          } else {
+            view.setUint32(valuePos, adjusted >>> 0);
+          }
+        }
+      }
+      offset += size;
+    } else {
+      offset += size;
+    }
+  }
+  return patch.slice(patch.byteOffset, patch.byteOffset + patch.byteLength);
+};
+
 const prependHeader = async (
   headerBuffer: ArrayBuffer,
   chunkBlob: Blob,
   mimeType: string
 ) => {
   const chunkBytes = new Uint8Array(await chunkBlob.arrayBuffer());
-  const merged = new Uint8Array(headerBuffer.byteLength + chunkBytes.byteLength);
+  let body = chunkBytes;
+
+  // Browsers re-emit the container header (EBML+Segment/Info/Tracks or
+  // ftyp+moov) at the start of every timeslice blob. Prepending the chunk-0
+  // header on top of that nests two headers and breaks the file. Strip the
+  // chunk's own header, keeping only its media payload (clusters / moof+mdat
+  // fragments).
+  const headerEnd = extractContainerHeader(chunkBytes.buffer, mimeType);
+  if (headerEnd !== null && headerEnd > 0 && headerEnd < chunkBytes.byteLength) {
+    body = new Uint8Array(chunkBytes.buffer.slice(headerEnd, chunkBytes.byteLength));
+  }
+
+  // Rebase the chunk timeline so the uploaded file starts at t=0 (absolute
+  // times like 30s/60s make every chunk after the first play with a silent
+  // lead-in and puff the reported duration up to 1min/1min30s).
+  if (mimeType === 'audio/webm') {
+    const normalized = normalizeWebmTimecodes(body);
+    if (normalized) body = normalized;
+  } else if (mimeType === 'audio/mp4') {
+    const normalized = normalizeMp4Fragments(body);
+    if (normalized) body = normalized;
+  }
+
+  const merged = new Uint8Array(headerBuffer.byteLength + body.byteLength);
   merged.set(new Uint8Array(headerBuffer), 0);
-  merged.set(chunkBytes, headerBuffer.byteLength);
+  merged.set(body, headerBuffer.byteLength);
   return new Blob([merged], { type: mimeType });
 };
 
@@ -937,6 +1243,11 @@ function ReportingPanel() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [prefillContent, setPrefillContent] = useState<string | null>(null);
   const [erpRefId, setErpRefId] = useState<string>('');
+  const [departmentId, setDepartmentId] = useState<string>('');
+  const [testId, setTestId] = useState<string>('');
+  // Visit id resolved from getAutoFillTemplate (fallback when get-recording-config
+  // does not include visit_id).
+  const [resolvedVisitId, setResolvedVisitId] = useState<string>('');
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const urlSeedAppliedRef = useRef(false);
@@ -1048,6 +1359,15 @@ function ReportingPanel() {
           if (tpl && (tpl.erpRefId || tpl.presignedUrl)) {
             erpRef = tpl.erpRefId || '';
             if (!cancelled) setErpRefId(erpRef);
+            if (!cancelled) {
+              setDepartmentId(tpl.departmentId || '');
+              setTestId(tpl.testId || '');
+            }
+            // Capture visitId from the auto-fill response as a fallback in
+            // case get-recording-config does not include one.
+            const tplVisitRaw = tpl?.visitId || tpl?.visit_id || tpl?.visitID;
+            const tplVisitId = tplVisitRaw != null && String(tplVisitRaw).trim() !== '' ? String(tplVisitRaw) : '';
+            if (!cancelled) setResolvedVisitId(tplVisitId);
             if (tpl.presignedUrl) {
               const fileRes = await fetch(tpl.presignedUrl);
               const text = await fileRes.text();
@@ -1207,7 +1527,7 @@ function ReportingPanel() {
               onKeyUp={(e) => e.stopPropagation()}
               onKeyPress={(e) => e.stopPropagation()}
             >
-              <ToolbarPlugin isExpanded={isExpanded} studyUid={studyUid} erpRefId={erpRefId} />
+              <ToolbarPlugin isExpanded={isExpanded} studyUid={studyUid} erpRefId={erpRefId} department={departmentId} testType={testId} resolvedVisitId={resolvedVisitId} />
               <div className="flex-1 relative overflow-y-auto bg-white text-black">
                 <RichTextPlugin
                   contentEditable={<ContentEditable className={`h-full w-full outline-none resize-none p-4 ${isExpanded ? 'text-lg leading-relaxed max-w-4xl mx-auto' : 'text-sm'}`} />}

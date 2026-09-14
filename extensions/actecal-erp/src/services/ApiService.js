@@ -442,11 +442,13 @@ class ApiService {
   }
 
   async getRecordingConfig(refId) {
-    return authFetch(`${this._hmsUrl()}/get-recording-config`, {
+    const res = await authFetch(`${this._hmsUrl()}/get-recording-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ receiptno: refId }),
     });
+    console.log('[scribe] getRecordingConfig response:', res);
+    return res;
   }
 }
 
