@@ -4,7 +4,8 @@ import ApiService from '../services/ApiService';
 
 function ShareModal({ studyInstanceUid, hide }) {
   const [tab, setTab] = useState('internal');
-  const [doctors, setDoctors] = useState([]);
+  const [doctors, setDoctors] = useState();
+  console.log(doctors);
   const [formData, setFormData] = useState({});
   const [signedUrl, setSignedUrl] = useState(null);
 
@@ -13,6 +14,8 @@ function ShareModal({ studyInstanceUid, hide }) {
       const api = new ApiService();
       api.getDoctors()
         .then(res => {
+          console.log("getDoctors response:", res);
+          setDoctors(res);
           if (Array.isArray(res)) {
             setDoctors(res);
           } else if (res && Array.isArray(res.data)) {
@@ -34,9 +37,12 @@ function ShareModal({ studyInstanceUid, hide }) {
   const handleSubmit = async () => {
     try {
       const api = new ApiService();
-      const response = await api.shareStudy({ studyInstanceUid, ...formData });
-      if (response.signedUrl) {
-        setSignedUrl(response.signedUrl);
+      const response = await api.shareStudy(studyInstanceUid, formData);
+      const url = response?.shareUrl || response?.signedUrl || response?.url || (response?.shareCode ? `${window.location.origin}/shared/${response.shareCode}` : null);
+      if (url) {
+        setSignedUrl(url);
+      } else {
+        console.warn("Unexpected shareStudy response:", response);
       }
     } catch (e) {
       console.error("Failed to share study:", e);
@@ -51,7 +57,7 @@ function ShareModal({ studyInstanceUid, hide }) {
           <TabsTrigger value="external">External Expert</TabsTrigger>
         </TabsList>
       </Tabs>
-      
+
       {tab === 'internal' && (
         <div className="space-y-4">
           <p className="text-sm font-medium">Choose a doctor:</p>
@@ -68,7 +74,7 @@ function ShareModal({ studyInstanceUid, hide }) {
           </select>
         </div>
       )}
-      
+
       {tab === 'external' && (
         <div className="space-y-4">
           <div className="space-y-2">
@@ -91,7 +97,7 @@ function ShareModal({ studyInstanceUid, hide }) {
           </div>
         </div>
       )}
-      
+
       {signedUrl ? (
         <div className="space-y-4 pt-4">
           <p className="text-sm font-medium">Shareable Link:</p>

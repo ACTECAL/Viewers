@@ -41,11 +41,11 @@ function ShortcutToast({ onClose, onShowPreferences }) {
       </div>
       <p className="text-sm font-light leading-relaxed">{TIPS[tipIndex]}</p>
       <div className="flex justify-end mt-2">
-        <button 
+        <button
           onClick={() => {
             localStorage.setItem('hideShortcutToast', 'true');
             onClose();
-          }} 
+          }}
           className="text-xs text-gray-400 hover:text-white transition-colors"
         >
           Don't show this again
@@ -117,7 +117,7 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
     if (dataSourceIdx !== -1 && existingDataSource) {
       searchQuery.append('datasources', pathname.substring(dataSourceIdx + 1));
     }
-    
+
     // Explicitly preserve Actecal specific query parameters
     const currentQuery = new URLSearchParams(window.location.search);
     ['userId', 'tenant', 'sharecode'].forEach(key => {
@@ -125,7 +125,7 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
         searchQuery.append(key, currentQuery.get(key));
       }
     });
-    
+
     preserveQueryParameters(searchQuery);
 
     navigate({
@@ -239,13 +239,13 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
         )
       }
       UndoRedo={
-        <div className="text-primary flex cursor-pointer items-center">
+        <div className="text-primary flex cursor-pointer items-center" >
           <Button
             variant="ghost"
             className="hover:bg-muted"
             onClick={() => {
               commandsManager.run('undo');
-            }}
+          }}
           >
             <Icons.Undo className="" />
           </Button>

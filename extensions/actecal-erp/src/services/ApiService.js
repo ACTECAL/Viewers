@@ -376,8 +376,8 @@ class ApiService {
     return authFetch(`${this.baseUrl}/doctors`);
   }
 
-  async shareStudy(data) {
-    return authFetch(`${this.baseUrl}/share`, {
+  async shareStudy(studyInstanceUid, data = {}) {
+    return authFetch(`${this.baseUrl}/studies/${studyInstanceUid}/share`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
