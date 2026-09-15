@@ -15,17 +15,23 @@ function ShareModal({ studyInstanceUid, hide }) {
       api.getDoctors()
         .then(res => {
           console.log("getDoctors response:", res);
-          setDoctors(res);
+          let doctorList = [];
           if (Array.isArray(res)) {
-            setDoctors(res);
+            doctorList = res;
           } else if (res && Array.isArray(res.data)) {
-            setDoctors(res.data);
+            doctorList = res.data;
           } else if (res && Array.isArray(res.doctors)) {
-            setDoctors(res.doctors);
+            doctorList = res.doctors;
+          } else if (res && res.data && res.data.id) {
+            doctorList = [res.data];
+          } else if (res && res.doctor && res.doctor.id) {
+            doctorList = [res.doctor];
+          } else if (res && res.id) {
+            doctorList = [res];
           } else {
             console.warn("Unexpected getDoctors response:", res);
-            setDoctors([]);
           }
+          setDoctors(doctorList);
         })
         .catch(err => {
           console.error(err);

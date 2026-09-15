@@ -519,22 +519,22 @@ async function preRegistration({  extensionManager,
     displaySetService.EVENTS.DISPLAY_SETS_ADDED,
     async ({ displaySetsAdded }) => {
       if (!displaySetsAdded || displaySetsAdded.length === 0) return;
-      
+
       const studyUid = displaySetsAdded[0].StudyInstanceUID;
       if (!studyUid || loadedStudiesForMeasurements.has(studyUid)) return;
-      
+
       loadedStudiesForMeasurements.add(studyUid);
-      
+
       try {
         console.log(`Loading measurements dynamically for study: ${studyUid}`);
-        
+
         // ensure apiService uses latest userId if available
         const currentParams = parse(window.location.search);
         const dynamicApiService = new ApiService(currentParams.userId || queryParams.userId);
-        
+
         const measurements = await dynamicApiService.fetchMeasurements(studyUid);
         console.log(`Fetched measurements dynamically:`, measurements);
-        
+
         measurements?.forEach(measurement => {
           measurementService.addRawMeasurement(
             measurementSource,
@@ -583,7 +583,7 @@ async function preRegistration({  extensionManager,
   const debouncedSaveMeasurement = (studyUid, measurement, eventType) => {
     const uid = measurement.uid;
     measurementStudyMap[uid] = studyUid;
-    
+
     if (saveTimers[uid]) {
       clearTimeout(saveTimers[uid]);
     }
@@ -600,7 +600,7 @@ async function preRegistration({  extensionManager,
     const studyUid = measurement?.referenceStudyUID || measurement?.studyInstanceUid;
     if (studyUid) {
       debouncedSaveMeasurement(studyUid, measurement, 'ADD');
-      
+
       // Dispatch custom event to inject into Lexical
       const customEvent = new CustomEvent('actecal:injectMeasurement', {
          detail: { measurement }
