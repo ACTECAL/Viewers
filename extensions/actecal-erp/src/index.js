@@ -643,10 +643,14 @@ import ShareModal from './components/ShareModal';
 function getCommandsModule({ servicesManager }) {
   const actions = {
     openShareModal: () => {
-      const { uiModalService, viewportGridService } = servicesManager.services;
+      const { uiModalService, viewportGridService, displaySetService } = servicesManager.services;
       const state = viewportGridService.getState();
-      const activeViewport = state.viewports[state.activeViewportIndex];
-      const studyInstanceUid = activeViewport?.StudyInstanceUID;
+      const activeViewport = state.activeViewportId && state.viewports.get(state.activeViewportId);
+      const displaySetInstanceUid = activeViewport?.displaySetInstanceUIDs?.[0];
+      const displaySet = displaySetInstanceUid
+        ? displaySetService.getDisplaySetByUID(displaySetInstanceUid)
+        : undefined;
+      const studyInstanceUid = displaySet?.StudyInstanceUID;
 
       uiModalService.show({
         content: ShareModal,

@@ -3,6 +3,7 @@ import { Input, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@ohif/u
 import ApiService from '../services/ApiService';
 
 function ShareModal({ studyInstanceUid, hide }) {
+  console.log("ShareModal props:", { studyInstanceUid, hide });
   const [tab, setTab] = useState('internal');
   const [doctors, setDoctors] = useState();
   console.log(doctors);

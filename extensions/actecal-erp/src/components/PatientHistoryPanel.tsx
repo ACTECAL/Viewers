@@ -1,38 +1,71 @@
 import React, { useEffect, useState } from 'react';
-import PropTypes from 'prop-types';
+import { useSystem } from '@ohif/core';
+import ApiService from '../services/ApiService';
 
-const PatientHistoryPanel = ({ servicesManager, extensionManager }) => {
+const PatientHistoryPanel = () => {
+  const { servicesManager } = useSystem();
+  const { viewportGridService, displaySetService } = servicesManager.services;
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [studyInstanceUid, setStudyInstanceUid] = useState(null);
 
-  // We fetch the study instance uid from the viewport or active state
+  // Resolve the active study from the current viewport (grid state is a Map
+  // keyed by viewportId; the study UID lives on the display set, not the viewport).
+  const resolveStudy = () => {
+    const state = viewportGridService?.getState();
+    const activeViewport = state?.activeViewportId && state?.viewports?.get(state.activeViewportId);
+    const displaySetInstanceUid = activeViewport?.displaySetInstanceUIDs?.[0];
+    const displaySet = displaySetInstanceUid
+      ? displaySetService?.getDisplaySetByUID(displaySetInstanceUid)
+      : undefined;
+    setStudyInstanceUid(displaySet?.StudyInstanceUID);
+  };
+
+  // Re-resolve whenever the active viewport or grid changes so the history
+  // always follows the patient whose study is currently open.
   useEffect(() => {
-    // Placeholder logic for API call
+    resolveStudy();
+    const subscription = viewportGridService?.subscribe(
+      viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
+      resolveStudy
+    );
+    const gridSubscription = viewportGridService?.subscribe(
+      viewportGridService.EVENTS.GRID_STATE_CHANGED,
+      resolveStudy
+    );
+    return () => {
+      subscription?.unsubscribe?.();
+      gridSubscription?.unsubscribe?.();
+    };
+  }, [viewportGridService, displaySetService]);
+
+  // Fetch the current patient's past test reports from the backend.
+  useEffect(() => {
+    if (!studyInstanceUid) {
+      setLoading(false);
+      setHistory([]);
+      return;
+    }
+
+    let cancelled = false;
     const fetchHistory = async () => {
       setLoading(true);
       try {
-        // Simulate API call using active study instance UID
-        // const { displaySetService } = servicesManager.services;
-        // const activeDisplaySets = displaySetService.getActiveDisplaySets();
-        // const studyInstanceUid = activeDisplaySets?.[0]?.StudyInstanceUID;
-        
-        // Mock API response
-        setTimeout(() => {
-          setHistory([
-            { date: '2023-10-12', description: 'Previous CT Chest', status: 'Signed Off' },
-            { date: '2022-05-04', description: 'X-Ray Chest', status: 'Reported' },
-          ]);
-          setLoading(false);
-        }, 1000);
-
+        const apiService = new ApiService();
+        const res = await apiService.getPatientHistory(studyInstanceUid);
+        const list = res?.data || (Array.isArray(res) ? res : []);
+        if (!cancelled) setHistory(Array.isArray(list) ? list : []);
       } catch (error) {
         console.error('Failed to fetch patient history', error);
-        setLoading(false);
+        if (!cancelled) setHistory([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchHistory();
-  }, []);
+    return () => { cancelled = true; };
+  }, [studyInstanceUid]);
 
   if (loading) {
     return (
@@ -42,29 +75,44 @@ const PatientHistoryPanel = ({ servicesManager, extensionManager }) => {
     );
   }
 
+  if (!studyInstanceUid) {
+    return (
+      <div className="flex flex-col p-4 text-white">
+        <h3 className="mb-4 text-lg font-semibold">Patient History</h3>
+        <p className="text-sm text-gray-400">No study selected.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col p-4 text-white">
-      <h3 className="mb-4 text-lg font-semibold">Patient History</h3>
+      <div className="flex flex-col gap-1 mb-4">
+        <h3 className="text-lg font-semibold">Patient History</h3>
+        {history.length > 0 && history[0]?.patientName && (
+          <span className="text-sm text-primary-light">{history[0].patientName}</span>
+        )}
+      </div>
       {history.length === 0 ? (
         <p className="text-sm text-gray-400">No previous history found.</p>
       ) : (
         <div className="flex flex-col gap-3">
           {history.map((item, index) => (
-            <div key={index} className="flex flex-col rounded bg-secondary-dark p-3 text-sm">
-              <span className="font-bold text-primary-light">{item.date}</span>
-              <span className="text-white">{item.description}</span>
-              <span className="text-xs text-gray-400 mt-1">Status: {item.status}</span>
+            <div key={item.reportId || item.erpRefId || index} className="flex flex-col rounded bg-secondary-dark p-3 text-sm">
+              <span className="font-bold text-primary-light">
+                {item.testName || item.departmentName || 'Report'}
+              </span>
+              {item.testName && item.departmentName && item.departmentName !== item.testName && (
+                <span className="text-white">Dept: {item.departmentName}</span>
+              )}
+              <span className="text-xs text-gray-400 mt-1">
+                {(item.reportType || 'report').toUpperCase()} • {item.createdDate || ''}
+              </span>
             </div>
           ))}
         </div>
       )}
     </div>
   );
-};
-
-PatientHistoryPanel.propTypes = {
-  servicesManager: PropTypes.object.isRequired,
-  extensionManager: PropTypes.object.isRequired,
 };
 
 export default PatientHistoryPanel;

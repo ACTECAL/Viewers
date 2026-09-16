@@ -258,50 +258,110 @@ const TENANT = window.config.tenant;
 // };
 
 // ────────────────────────────────────────────────
+// Token Refresh State (shared across fetch calls)
+// ────────────────────────────────────────────────
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) prom.reject(error);
+    else prom.resolve();
+  });
+  failedQueue = [];
+};
+
+// Refresh the Cognito access token: the backend reads the
+// httpOnly refresh_token cookie and re-issues a fresh
+// access_token cookie (POST /erp/:tenant/auth/token).
+const refreshTokens = async () => {
+  if (isRefreshing) {
+    return new Promise((resolve, reject) => {
+      failedQueue.push({ resolve, reject });
+    });
+  }
+
+  isRefreshing = true;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/erp/${TENANT}/auth/token`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+
+    if (!response.ok) throw new Error('Refresh failed');
+
+    processQueue();
+    return true;
+  } catch (err) {
+    processQueue(err);
+    throw err;
+  } finally {
+    isRefreshing = false;
+  }
+};
+
+// Redirect to Cognito login when refresh is impossible
+// (e.g. the refresh token itself has expired).
+const redirectToLogin = () => {
+  const tenantName = localStorage.getItem("tenantName") || TENANT || "default";
+  const tenantConfig = JSON.parse(localStorage.getItem("tenantConfig") || "{}");
+  const cognitoDomain =
+    tenantConfig?.auth?.cognitoDomain ||
+    "https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com";
+  const clientId = tenantConfig?.auth?.clientId;
+  const redirectUri = tenantConfig?.auth?.redirectUri;
+
+  if (clientId && redirectUri) {
+    const loginUrl = `${cognitoDomain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${encodeURIComponent(
+      redirectUri
+    )}&state=${encodeURIComponent(`tenant=${tenantName}`)}`;
+    window.location.href = loginUrl;
+  } else {
+    window.location.href = "/";
+  }
+};
+
+// ────────────────────────────────────────────────
 // Enhanced Fetch with 401 Refresh Logic
 // ────────────────────────────────────────────────
 const authFetch = async (url, options = {}) => {
-  const response = await fetch(url, {
+  let response = await fetch(url, {
     ...options,
     credentials: 'include',
   });
 
-  // ────────────────────────────────────────────────
-  // TEMP: Token/401 refresh logic disabled to avoid
-  // needing an authorized token (prevents 401 issues).
-  // ────────────────────────────────────────────────
-  // // Handle 401
-  // if (response.status === 401) {
-  //   const originalRequest = { url, options };
+  // Handle 401 → the Cognito access token (cookie) expired.
+  // Refresh it via /auth/token and retry the original request.
+  if (response.status === 401) {
+    if (isRefreshing) {
+      // Wait for the ongoing refresh, then retry
+      await new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      });
+      return authFetch(url, options);
+    }
 
-  //   if (isRefreshing) {
-  //     // Wait for ongoing refresh
-  //     await new Promise((resolve, reject) => {
-  //       failedQueue.push({ resolve, reject });
-  //     });
-  //     // Retry after queue is processed
-  //     return authFetch(url, options);
-  //   }
+    try {
+      await refreshTokens();
+      // Retry original request with the fresh cookie
+      response = await fetch(url, {
+        ...options,
+        credentials: 'include',
+      });
+    } catch (refreshError) {
+      console.error("[AUTH FETCH] Refresh failed → redirecting to login");
+      redirectToLogin();
+      throw refreshError;
+    }
+  }
 
-  //   try {
-  //     await refreshTokens();
-  //     // Retry original request
-  //     response = await fetch(url, {
-  //       ...options,
-  //       credentials: 'include',
-  //     });
-  //   } catch (refreshError) {
-  //     console.error("[AUTH FETCH] Refresh failed → redirecting to login");
-  //     redirectToLogin();
-  //     throw refreshError;
-  //   }
-  // }
-
-  // // Handle 403
-  // if (response.status === 403) {
-  //   window.location.href = "/access-denied";
-  //   throw new Error("Access Denied");
-  // }
+  // Handle 403
+  if (response.status === 403) {
+    window.location.href = "/access-denied";
+    throw new Error("Access Denied");
+  }
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -382,6 +442,10 @@ class ApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+  }
+
+  async resolveShare(shareCode) {
+    return authFetch(`${this.baseUrl}/resolve-share?code=${encodeURIComponent(shareCode)}`);
   }
 
   // ────────────────────────────────────────────────
