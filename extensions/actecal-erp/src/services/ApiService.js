@@ -8,7 +8,7 @@ let isRefreshing = false;
 let failedQueue = [];
 
 const processQueue = (error = null) => {
-  failedQueue.forEach((prom) => {
+  failedQueue.forEach(prom => {
     if (error) prom.reject(error);
     else prom.resolve();
   });
@@ -19,12 +19,9 @@ const processQueue = (error = null) => {
 // Called after a successful token refresh so the stored user stays valid.
 const fetchAndStorePermissions = async () => {
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/erp/${TENANT}/auth/get-permission`,
-      {
-        credentials: 'include',
-      }
-    );
+    const response = await fetch(`${API_BASE_URL}/erp/${TENANT}/auth/get-permission`, {
+      credentials: 'include',
+    });
 
     if (!response.ok) return;
 
@@ -49,7 +46,12 @@ const fetchAndStorePermissions = async () => {
 // refresh_token cookie and re-issues fresh cookies
 // (POST /erp/:tenant/auth/token).
 const refreshTokens = async () => {
+  console.log('[AUTH REFRESH] Called');
+  console.log('[AUTH REFRESH] isRefreshing:', isRefreshing);
+
   if (isRefreshing) {
+    console.log('[AUTH REFRESH] Already refreshing, adding to queue');
+
     return new Promise((resolve, reject) => {
       failedQueue.push({ resolve, reject });
     });
@@ -58,19 +60,32 @@ const refreshTokens = async () => {
   isRefreshing = true;
 
   try {
+    console.log('[AUTH REFRESH] Calling /auth/token');
+
     const response = await fetch(`${API_BASE_URL}/erp/${TENANT}/auth/token`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
     });
 
-    if (!response.ok) throw new Error('Refresh failed');
+    console.log('[AUTH REFRESH] Response:', response.status);
+
+    if (!response.ok) {
+      throw new Error(`Refresh failed: ${response.status}`);
+    }
 
     await fetchAndStorePermissions();
 
     processQueue();
+
+    console.log('[AUTH REFRESH] Refresh successful');
+
     return true;
   } catch (err) {
+    console.error('[AUTH REFRESH] Refresh error:', err);
+
     processQueue(err);
     throw err;
   } finally {
@@ -87,18 +102,14 @@ const redirectToLogin = () => {
   const auth = tenantConfig?.auth || {};
 
   const cognitoDomain =
-    auth.cognitoDomain ||
-    'https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com';
-  const clientId = auth.clientId;
+    auth.cognitoDomain || 'https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com';
+  const clientId = auth.clientId || '36t5q5ljl36405lcjfhajif16d';
 
-  const isLocalDev =
-    API_BASE_URL.includes('localhost') || process.env.NODE_ENV === 'development';
+  const isLocalDev = API_BASE_URL.includes('localhost') || process.env.NODE_ENV === 'development';
 
   const redirectUri =
     auth.redirectUri ||
-    (isLocalDev
-      ? `${API_BASE_URL}/erp/${tenantName}/auth/cognito-callback`
-      : null);
+    (isLocalDev ? `${API_BASE_URL}/erp/${tenantName}/auth/cognito-callback` : null);
 
   if (clientId && redirectUri) {
     const loginUrl = `${cognitoDomain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${encodeURIComponent(
@@ -113,38 +124,101 @@ const redirectToLogin = () => {
 // ────────────────────────────────────────────────
 // Enhanced Fetch with 401 Refresh Logic
 // ────────────────────────────────────────────────
+// const authFetch = async (url, options = {}) => {
+//   let response = await fetch(url, {
+//     ...options,
+//     credentials: 'include',
+//   });
+
+//   // Handle 401 → the Cognito access token (cookie) expired.
+//   // Refresh it via /auth/token and retry the original request.
+//   if (response.status === 401) {
+//     if (isRefreshing) {
+//       // Wait for the ongoing refresh, then retry
+//       await new Promise((resolve, reject) => {
+//         failedQueue.push({ resolve, reject });
+//       });
+//       return authFetch(url, options);
+//     }
+
+//     try {
+//       await refreshTokens();
+//       // Retry original request with the fresh cookie
+//       response = await fetch(url, {
+//         ...options,
+//         credentials: 'include',
+//       });
+//     } catch (refreshError) {
+//       console.error('[AUTH FETCH] Refresh failed → redirecting to login');
+//       redirectToLogin();
+//       throw refreshError;
+//     }
+//   }
+
+//   // Handle 403
+//   if (response.status === 403) {
+//     window.location.href = '/access-denied';
+//     throw new Error('Access Denied');
+//   }
+
+//   if (!response.ok) {
+//     throw new Error(`HTTP error! status: ${response.status}`);
+//   }
+
+//   return response.json();
+// };
+
 const authFetch = async (url, options = {}) => {
+  console.log('[AUTH FETCH] Request:', url);
+
   let response = await fetch(url, {
     ...options,
     credentials: 'include',
   });
 
-  // Handle 401 → the Cognito access token (cookie) expired.
-  // Refresh it via /auth/token and retry the original request.
+  console.log('[AUTH FETCH] Response:', {
+    url,
+    status: response.status,
+  });
+
   if (response.status === 401) {
+    console.log('[AUTH FETCH] 401 detected:', url);
+    console.log('[AUTH FETCH] isRefreshing:', isRefreshing);
+
     if (isRefreshing) {
-      // Wait for the ongoing refresh, then retry
+      console.log('[AUTH FETCH] Waiting for existing refresh');
+
       await new Promise((resolve, reject) => {
         failedQueue.push({ resolve, reject });
       });
+
       return authFetch(url, options);
     }
 
     try {
+      console.log('[AUTH FETCH] Starting token refresh');
+
       await refreshTokens();
-      // Retry original request with the fresh cookie
+
+      console.log('[AUTH FETCH] Token refresh successful');
+
       response = await fetch(url, {
         ...options,
         credentials: 'include',
       });
+
+      console.log('[AUTH FETCH] Retry response:', {
+        url,
+        status: response.status,
+      });
     } catch (refreshError) {
-      console.error('[AUTH FETCH] Refresh failed → redirecting to login');
+      console.error('[AUTH FETCH] Refresh failed → redirecting to login', refreshError);
+
       redirectToLogin();
       throw refreshError;
     }
   }
 
-  // Handle 403
   if (response.status === 403) {
     window.location.href = '/access-denied';
     throw new Error('Access Denied');
@@ -263,11 +337,15 @@ class ApiService {
   }
 
   async getAutoFillTemplate(studyInstanceUid) {
-    return authFetch(`${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`);
+    return authFetch(
+      `${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`
+    );
   }
 
   async getPatientHistory(studyInstanceUid) {
-    return authFetch(`${this.baseUrl}/get-patient-history?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`);
+    return authFetch(
+      `${this.baseUrl}/get-patient-history?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`
+    );
   }
 
   async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType }) {
