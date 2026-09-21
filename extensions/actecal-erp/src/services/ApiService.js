@@ -1,6 +1,6 @@
 const API_BASE_URL = window.config.apiBaseUrl;
 const TENANT = window.config.tenant;
-
+console.log(API_BASE_URL, TENANT);
 // ────────────────────────────────────────────────
 // Token Refresh State (shared across fetch calls)
 // ────────────────────────────────────────────────
@@ -97,27 +97,76 @@ const refreshTokens = async () => {
 // /erp/:tenant/auth/cognito-callback which exchanges the code and sets the
 // httpOnly access/refresh cookies, then bounces back to the frontend.
 const redirectToLogin = () => {
+  console.log('========== [AUTH REDIRECT START] ==========');
+
   const tenantName = localStorage.getItem('tenantName') || TENANT || 'default';
-  const tenantConfig = JSON.parse(localStorage.getItem('tenantConfig') || '{}');
+
+  console.log('[AUTH REDIRECT] tenantName:', tenantName);
+  console.log('[AUTH REDIRECT] TENANT:', TENANT);
+  console.log('[AUTH REDIRECT] API_BASE_URL:', API_BASE_URL);
+
+  const rawTenantConfig = localStorage.getItem('tenantConfig');
+
+  console.log('[AUTH REDIRECT] raw tenantConfig:', rawTenantConfig);
+
+  const tenantConfig = JSON.parse(rawTenantConfig || '{}');
+
+  console.log('[AUTH REDIRECT] tenantConfig:', tenantConfig);
+
   const auth = tenantConfig?.auth || {};
+
+  console.log('[AUTH REDIRECT] auth config:', auth);
 
   const cognitoDomain =
     auth.cognitoDomain || 'https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com';
+
   const clientId = auth.clientId || '36t5q5ljl36405lcjfhajif16d';
 
+  console.log('[AUTH REDIRECT] cognitoDomain:', cognitoDomain);
+  console.log('[AUTH REDIRECT] clientId:', clientId);
+
   const isLocalDev = API_BASE_URL.includes('localhost') || process.env.NODE_ENV === 'development';
+
+  console.log('[AUTH REDIRECT] isLocalDev:', isLocalDev);
+  console.log('[AUTH REDIRECT] NODE_ENV:', process.env.NODE_ENV);
 
   const redirectUri =
     auth.redirectUri ||
     (isLocalDev ? `${API_BASE_URL}/erp/${tenantName}/auth/cognito-callback` : null);
 
+  console.log('[AUTH REDIRECT] auth.redirectUri:', auth.redirectUri);
+  console.log('[AUTH REDIRECT] final redirectUri:', redirectUri);
+
+  console.log('[AUTH REDIRECT] clientId exists:', !!clientId);
+  console.log('[AUTH REDIRECT] redirectUri exists:', !!redirectUri);
+
   if (clientId && redirectUri) {
-    const loginUrl = `${cognitoDomain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}&state=${encodeURIComponent(`tenant=${tenantName}`)}`;
+    const loginUrl =
+      `${cognitoDomain}/login` +
+      `?client_id=${clientId}` +
+      `&response_type=code` +
+      `&scope=email+openid+phone` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&state=${encodeURIComponent(`tenant=${tenantName}`)}`;
+
+    console.log('[AUTH REDIRECT] FINAL LOGIN URL:', loginUrl);
+    console.log('[AUTH REDIRECT] Redirecting to Cognito login...');
+
+    console.log('========== [AUTH REDIRECT END] ==========');
+
     window.location.href = loginUrl;
   } else {
-    window.location.href = '/';
+    console.error('[AUTH REDIRECT] Cannot redirect to Cognito!', {
+      clientId,
+      redirectUri,
+      tenantName,
+      cognitoDomain,
+      isLocalDev,
+    });
+
+    console.log('========== [AUTH REDIRECT FAILED] ==========');
+
+    // Do not redirect to "/"
   }
 };
 
