@@ -324,7 +324,10 @@ class ApiService {
   async saveMeasurement(studyInstanceUid, measurementData) {
     return authFetch(`${this.baseUrl}/studies/${studyInstanceUid}/measurements`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': this.userId,
+      },
       body: JSON.stringify(measurementData),
     });
   }
@@ -332,6 +335,7 @@ class ApiService {
   async deleteMeasurement(annotationUID) {
     return authFetch(`${this.baseUrl}/measurements/${annotationUID}`, {
       method: 'DELETE',
+      headers: { 'x-user-id': this.userId },
     });
   }
 

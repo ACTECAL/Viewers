@@ -179,10 +179,218 @@ import IoTService from './services/IoTService';
 import {
   MeasurementService,
 } from '@ohif/core';
+import { annotation } from '@cornerstonejs/tools';
+import { triggerAnnotationRenderForViewportIds } from '@cornerstonejs/tools/utilities';
 
 import { parse } from 'query-string';
 
 const extensionId = '@ohif/extension-actecal-erp';
+
+const CORNERSTONE_SOURCE_NAME = 'Cornerstone3DTools';
+const CORNERSTONE_SOURCE_VERSION = '0.1';
+
+// Color coding per owner: current user's measurements red, others blue.
+const MY_MEASUREMENT_COLOR = 'rgb(255, 45, 45)';
+const OTHER_MEASUREMENT_COLOR = 'rgb(60, 120, 255)';
+
+function getCurrentUserId() {
+  return new URLSearchParams(window.location.search).get('userId') || null;
+}
+
+function getOwnerColor(m, currentUserId) {
+  const owner = m && (m.created_by ?? m.createdBy);
+  if (owner && String(owner) === String(currentUserId)) {
+    return MY_MEASUREMENT_COLOR;
+  }
+  return OTHER_MEASUREMENT_COLOR;
+}
+
+// Parse the saved display text (e.g. "1895 mm") back into csTools cachedStats.
+function parseMeasurementText(primary) {
+  if (!Array.isArray(primary) || !primary.length) {
+    return null;
+  }
+
+  const text = String(primary[0]).trim();
+  const match = text.match(/(-?[\d.,]+)\s*([a-zA-Z%°²³]*)/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    length: parseFloat(match[1].replace(/,/g, '')),
+    unit: match[2] || 'mm',
+  };
+}
+
+// Resolve the imageId (and series/study) for a SOPInstanceUID by scanning the
+// loaded display sets of the study.
+function resolveImageReference(displaySetService, studyUid, sopInstanceUid) {
+  if (!sopInstanceUid) {
+    return null;
+  }
+
+  let displaySets = [];
+  try {
+    displaySets = displaySetService.getDisplaySetsBy(
+      ds => ds.StudyInstanceUID === studyUid
+    );
+  } catch (e) {
+    displaySets = displaySetService.activeDisplaySets || [];
+  }
+
+  for (const ds of displaySets) {
+    const instances = ds.instances || ds.images || [];
+    const imageIds = ds.imageIds || (ds.images || []).map(i => i.imageId);
+    const idx = instances.findIndex(i => i.SOPInstanceUID === sopInstanceUid);
+
+    if (idx === -1) {
+      continue;
+    }
+
+    const referencedImageId =
+      (imageIds && imageIds[idx]) || instances[idx]?.imageId;
+
+    if (referencedImageId) {
+      return {
+        referencedImageId,
+        SOPInstanceUID: sopInstanceUid,
+        SeriesInstanceUID: ds.SeriesInstanceUID || instances[idx]?.SeriesInstanceUID,
+        StudyInstanceUID: ds.StudyInstanceUID || studyUid,
+      };
+    }
+  }
+
+  return null;
+}
+
+// Convert a stored measurement (from the get-measurements API) back into a
+// csTools annotation and push it through the cornerstone measurement source so
+// that it renders on the viewport.
+function hydrateMeasurement(
+  measurementService,
+  displaySetService,
+  extensionManager,
+  cornerstoneViewportService,
+  studyUid,
+  m
+) {
+  const data = (m && m.data && typeof m.data === 'object' && !Array.isArray(m.data) && m.data.uid)
+    ? m.data
+    : m;
+
+  if (!data || typeof data !== 'object' || !data.uid) {
+    console.warn('Skipping invalid measurement:', m);
+    return;
+  }
+
+  const toolName = data.toolName;
+  if (!toolName) {
+    console.warn('Measurement has no toolName, skipping:', data);
+    return;
+  }
+
+  const source = measurementService.getSource(
+    CORNERSTONE_SOURCE_NAME,
+    CORNERSTONE_SOURCE_VERSION
+  );
+  if (!source) {
+    console.warn(`Cornerstone measurement source '${CORNERSTONE_SOURCE_NAME}' not found`);
+    return;
+  }
+
+  const sourceMappings =
+    measurementService.getSourceMappings(
+      CORNERSTONE_SOURCE_NAME,
+      CORNERSTONE_SOURCE_VERSION
+    ) || [];
+  const mapping = sourceMappings.find(mp => mp.annotationType === toolName);
+  if (!mapping) {
+    console.warn(`No measurement mapping for tool '${toolName}', skipping:`, data);
+    return;
+  }
+
+  let referencedImageId = data.referencedImageId || data.metadata?.referencedImageId || null;
+  let seriesInstanceUID = data.SeriesInstanceUID || data.metadata?.SeriesInstanceUID || null;
+  let studyInstanceUID = data.StudyInstanceUID || data.metadata?.StudyInstanceUID || studyUid;
+
+  if (!referencedImageId) {
+    const resolved = resolveImageReference(
+      displaySetService,
+      studyInstanceUID,
+      data.SOPInstanceUID
+    );
+    if (resolved) {
+      referencedImageId = resolved.referencedImageId;
+      seriesInstanceUID = seriesInstanceUID || resolved.SeriesInstanceUID;
+      studyInstanceUID = studyInstanceUID || resolved.StudyInstanceUID;
+    }
+  }
+
+  if (!referencedImageId) {
+    console.warn(`Could not resolve imageId for measurement '${data.uid}', skipping:`, data);
+    return;
+  }
+
+  const parsed = parseMeasurementText(data.displayText?.primary);
+  const cachedStats = parsed
+    ? { [referencedImageId]: { length: parsed.length, unit: parsed.unit } }
+    : {};
+
+  const annotationObject = {
+    annotationUID: data.uid,
+    predecessorImageId: data.predecessorImageId,
+    metadata: {
+      toolName,
+      FrameOfReferenceUID: data.FrameOfReferenceUID,
+      referencedImageId,
+      SOPInstanceUID: data.SOPInstanceUID,
+      SeriesInstanceUID: seriesInstanceUID,
+      StudyInstanceUID: studyInstanceUID,
+    },
+    data: {
+      label: data.label || '',
+      handles: {
+        points: data.points,
+        textBox: data.textBox,
+      },
+      cachedStats,
+    },
+  };
+
+  const activeDataSource = extensionManager.getActiveDataSource();
+  const dataSource = (activeDataSource && activeDataSource[0]) || null;
+
+  const measurementUid = measurementService.addRawMeasurement(
+    source,
+    toolName,
+    { annotation: annotationObject, uid: data.uid },
+    mapping.toMeasurementSchema,
+    dataSource
+  );
+
+  // Color-code by owner: current user red, other doctors blue.
+  if (measurementUid) {
+    try {
+      annotation.config.style.setAnnotationStyles(measurementUid, {
+        color: getOwnerColor(m, getCurrentUserId()),
+      });
+
+      if (cornerstoneViewportService) {
+        const renderingEngine = cornerstoneViewportService.getRenderingEngine();
+        const viewportIds = renderingEngine
+          ? renderingEngine.getViewports().map(viewport => viewport.id)
+          : [];
+        if (viewportIds.length) {
+          triggerAnnotationRenderForViewportIds(viewportIds);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to apply measurement color:', err);
+    }
+  }
+}
 
 /* ---------------------------
    STUDY INITIALIZATION
@@ -512,7 +720,7 @@ async function preRegistration({  extensionManager,
   await initializeStudy(extensionManager, servicesManager, measurementService, measurementSource, toMeasurementSchema);
 
   // Hook into display set loading to dynamically fetch measurements when navigating via Single Page App routing
-  const { displaySetService } = servicesManager.services;
+  const { displaySetService, cornerstoneViewportService } = servicesManager.services;
   const loadedStudiesForMeasurements = new Set();
 
   displaySetService.subscribe(
@@ -536,11 +744,13 @@ async function preRegistration({  extensionManager,
         console.log(`Fetched measurements dynamically:`, measurements);
 
         measurements?.forEach(measurement => {
-          measurementService.addRawMeasurement(
-            measurementSource,
-            'customAnnotationType',
-            measurement,
-            toMeasurementSchema
+          hydrateMeasurement(
+            measurementService,
+            displaySetService,
+            extensionManager,
+            cornerstoneViewportService,
+            studyUid,
+            measurement
           );
         });
       } catch(err) {
@@ -552,6 +762,42 @@ async function preRegistration({  extensionManager,
   // Clear cache if mode exits
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENTS_CLEARED, () => {
     loadedStudiesForMeasurements.clear();
+  });
+
+  // Hydrate real-time measurements received from other connected experts
+  // (published by the backend to AWS IoT → IoTService).
+  const hydrateExternalMeasurement = (detail) => {
+    const measurement = detail?.measurement || detail?.data;
+    if (!measurement) {
+      return;
+    }
+    const referenced = measurement.StudyInstanceUID ||
+      measurement.metadata?.StudyInstanceUID;
+    const sop = measurement.SOPInstanceUID;
+
+    let studyUid = referenced;
+    if (!studyUid) {
+      const resolved = resolveImageReference(displaySetService, null, sop);
+      studyUid = resolved?.StudyInstanceUID || null;
+    }
+
+    if (!studyUid) {
+      console.warn('Could not resolve study for external measurement:', measurement);
+      return;
+    }
+
+    hydrateMeasurement(
+      measurementService,
+      displaySetService,
+      extensionManager,
+      cornerstoneViewportService,
+      studyUid,
+      measurement
+    );
+  };
+
+  window.addEventListener('actecal:externalMeasurement', (event) => {
+    hydrateExternalMeasurement(event.detail);
   });
 
 
@@ -574,7 +820,13 @@ async function preRegistration({  extensionManager,
       label: m.label,
       displayText: m.displayText,
       type: m.type,
-      eventType: eventType
+      eventType: eventType,
+      SeriesInstanceUID: m.referenceSeriesUID || m.metadata?.SeriesInstanceUID,
+      StudyInstanceUID: m.referenceStudyUID || m.metadata?.StudyInstanceUID,
+      referencedImageId: m.referencedImageId || m.metadata?.referencedImageId,
+      textBox: m.textBox,
+      isLocked: m.isLocked,
+      isVisible: m.isVisible,
     };
   };
 

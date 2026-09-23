@@ -9,6 +9,7 @@ function ShareModal({ studyInstanceUid, hide }) {
   console.log(doctors);
   const [formData, setFormData] = useState({});
   const [signedUrl, setSignedUrl] = useState(null);
+  const [deliveryType, setDeliveryType] = useState('whatsapp');
 
   useEffect(() => {
     if (tab === 'internal') {
@@ -44,7 +45,10 @@ function ShareModal({ studyInstanceUid, hide }) {
   const handleSubmit = async () => {
     try {
       const api = new ApiService();
-      const response = await api.shareStudy(studyInstanceUid, formData);
+      const response = await api.shareStudy(studyInstanceUid, {
+        ...formData,
+        deliveryType,
+      });
       const url = response?.shareUrl || response?.signedUrl || response?.url || (response?.shareCode ? `${window.location.origin}/shared/${response.shareCode}` : null);
       if (url) {
         setSignedUrl(url);
@@ -84,6 +88,33 @@ function ShareModal({ studyInstanceUid, hide }) {
 
       {tab === 'external' && (
         <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Delivery Type</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDeliveryType('whatsapp')}
+                className={`p-2 rounded-md border text-sm ${
+                  deliveryType === 'whatsapp'
+                    ? 'border-primary bg-primary/20 text-white'
+                    : 'border-input text-foreground'
+                }`}
+              >
+                WhatsApp
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeliveryType('email')}
+                className={`p-2 rounded-md border text-sm ${
+                  deliveryType === 'email'
+                    ? 'border-primary bg-primary/20 text-white'
+                    : 'border-input text-foreground'
+                }`}
+              >
+                Email
+              </button>
+            </div>
+          </div>
           <div className="space-y-2">
             <p className="text-sm font-medium">Name</p>
             <Input
