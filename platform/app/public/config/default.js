@@ -2,11 +2,22 @@
 
 window.config = {
   name: 'config/default.js',
-  // apiBaseUrl:`https://api-dev.actecal.com`,
-  apiBaseUrl: `http://localhost:4000`,
+  apiBaseUrl: `https://api-dev.actecal.com`,
+  // apiBaseUrl: `http://localhost:4000`,
   tenant: 'autolight',
   iotCoreBaseUrl: `https://api-dev.actecal.com`,
   routerBasename: null,
+  // Cognito login, consumed by redirectToLogin() in
+  // extensions/actecal-erp/src/services/ApiService.js. Anything left empty
+  // falls back to a built-in default (and redirectUri falls back to
+  // `${apiBaseUrl}/erp/<tenant>/auth/cognito-callback`).
+  // NOTE: redirectUri must be listed in the Cognito app client's allowed
+  // callback URLs.
+  auth: {
+    cognitoDomain: 'https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com',
+    clientId: '36t5q5ljl36405lcjfhajif16d',
+    redirectUri: '',
+  },
   ai: {
     enabled: true,
     // Swappable AI provider + model. Change these any time without code changes.

@@ -65,6 +65,36 @@ NotFoundStudy.propTypes = {
   message: PropTypes.string,
 };
 
+// Reached from the 403 branch of authFetch in
+// extensions/actecal-erp/src/services/ApiService.js.
+const AccessDenied = () => {
+  const [appConfig] = useAppConfig();
+  const { showStudyList } = appConfig;
+
+  return (
+    <div className="text-foreground absolute flex h-full w-full items-center justify-center">
+      <div>
+        <h4 data-cy="access-denied-message">You do not have access to this resource.</h4>
+        {showStudyList && (
+          <p
+            className="mt-2"
+            data-cy="access-denied-return-message"
+          >
+            Return to the{' '}
+            <Link
+              className="text-highlight"
+              to="/"
+            >
+              study list
+            </Link>{' '}
+            or contact your administrator if you believe this is a mistake.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // TODO: Include "routes" debug route if dev build
 const bakedInRoutes = [
   {
@@ -74,6 +104,10 @@ const bakedInRoutes = [
   {
     path: `/notfoundstudy`,
     children: NotFoundStudy,
+  },
+  {
+    path: `/access-denied`,
+    children: AccessDenied,
   },
   {
     path: `/debug`,

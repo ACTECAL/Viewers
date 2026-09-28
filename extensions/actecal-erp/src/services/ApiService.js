@@ -1,6 +1,143 @@
-const API_BASE_URL = window.config.apiBaseUrl;
-const TENANT = window.config.tenant;
-console.log(API_BASE_URL, TENANT);
+// window.config is swapped at runtime by loadDynamicConfig (see
+// platform/app/src/index.js), so it is read on every call rather than captured
+// at import time - otherwise a late import freezes a stale apiBaseUrl/tenant.
+const getApiBaseUrl = () => window.config?.apiBaseUrl;
+const getTenant = () => window.config?.tenant;
+
+// ────────────────────────────────────────────────
+// Return-To Latch
+//
+// erp-api's /auth/cognito-callback bounces the browser back to a fixed URL, so
+// the page the user left (e.g. an open study) is lost across the login round
+// trip. The current location is latched before redirecting to Cognito and
+// restored on the next boot.
+//
+// sessionStorage is keyed per origin + tab, so it survives the
+// frontend -> Cognito -> erp-api -> frontend chain with no backend changes.
+// ────────────────────────────────────────────────
+const RETURN_TO_KEY = 'actecal_auth_returnTo';
+const RETURN_TO_TTL_MS = 15 * 60 * 1000;
+const MAX_LOGIN_ATTEMPTS = 2;
+
+// Only same-origin paths may be restored: leading "/" but not "//", which
+// browsers treat as protocol-relative (an open redirect).
+const isSafeReturnTo = url => typeof url === 'string' && url.startsWith('/') && !url.startsWith('//');
+
+const readReturnTo = () => {
+  try {
+    const raw = sessionStorage.getItem(RETURN_TO_KEY);
+
+    if (!raw) {
+      return null;
+    }
+
+    const entry = JSON.parse(raw);
+
+    if (!entry || !isSafeReturnTo(entry.url)) {
+      sessionStorage.removeItem(RETURN_TO_KEY);
+      return null;
+    }
+
+    if (Date.now() - entry.at > RETURN_TO_TTL_MS) {
+      console.log('[RETURN TO] Latch expired, dropping', entry.url);
+      sessionStorage.removeItem(RETURN_TO_KEY);
+      return null;
+    }
+
+    return entry;
+  } catch (err) {
+    sessionStorage.removeItem(RETURN_TO_KEY);
+    return null;
+  }
+};
+
+const writeReturnTo = entry => {
+  try {
+    sessionStorage.setItem(RETURN_TO_KEY, JSON.stringify(entry));
+  } catch (err) {
+    console.warn('[RETURN TO] Could not persist latch:', err);
+  }
+};
+
+export const clearReturnTo = () => {
+  try {
+    sessionStorage.removeItem(RETURN_TO_KEY);
+  } catch (err) {
+    // ignore - storage unavailable (private mode, quota, ...)
+  }
+};
+
+// Latch the current page. Called from redirectToLogin() just before leaving for
+// Cognito. An existing latch is never overwritten - it is the page the user
+// actually left from, whereas the current location may just be the URL erp-api
+// bounced back to.
+export const rememberReturnTo = () => {
+  const existing = readReturnTo();
+
+  if (existing) {
+    // Bound the redirect loop for a user who can never authenticate.
+    if (existing.attempts >= MAX_LOGIN_ATTEMPTS) {
+      console.warn('[RETURN TO] Attempt limit reached, dropping latch');
+      clearReturnTo();
+    }
+
+    return;
+  }
+
+  const { pathname, search, hash } = window.location;
+  const url = `${pathname}${search}${hash}`;
+
+  if (!isSafeReturnTo(url)) {
+    return;
+  }
+
+  writeReturnTo({ url, at: Date.now(), attempts: 0 });
+  console.log('[RETURN TO] Latched', url);
+};
+
+// Restore the latched page. Synchronous and network-free so it can run at the
+// very top of the app bootstrap, before root.render() and before the extension
+// preRegistration parses window.location.search for the study UIDs.
+//
+// After login erp-api bounces back to <viewer-origin>/?returnTo=<latched path>,
+// so that query param is the primary source; the sessionStorage latch is the
+// fallback for when the bounce did not carry one (e.g. an older backend, or a
+// bounce that landed straight on the viewer origin).
+//
+// The latch is kept (not deleted) so a later 401 knows the deep link is still
+// wanted; clearReturnTo() runs on the first authenticated response.
+export const restoreReturnTo = () => {
+  let fromQuery = null;
+
+  try {
+    fromQuery = new URLSearchParams(window.location.search).get('returnTo');
+  } catch (err) {
+    // ignore - malformed query string, fall back to the latch
+  }
+
+  const entry = readReturnTo();
+
+  if (entry) {
+    // Tick the attempt counter regardless of which source was used, so the
+    // redirect loop stays bounded.
+    writeReturnTo({ ...entry, attempts: (entry.attempts || 0) + 1 });
+  }
+
+  const target = isSafeReturnTo(fromQuery) ? fromQuery : entry?.url;
+
+  if (!target) {
+    return null;
+  }
+
+  // replaceState, not assign: avoids a reload and leaves no extra history entry.
+  // This also drops ?returnTo=, since the target is the deep link itself.
+  window.history.replaceState(window.history.state, '', target);
+
+  console.log(`[RETURN TO] Restored ${target} (source: ${isSafeReturnTo(fromQuery) ? 'query' : 'latch'})`);
+
+  return target;
+};
+
 // ────────────────────────────────────────────────
 // Token Refresh State (shared across fetch calls)
 // ────────────────────────────────────────────────
@@ -19,7 +156,7 @@ const processQueue = (error = null) => {
 // Called after a successful token refresh so the stored user stays valid.
 const fetchAndStorePermissions = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/erp/${TENANT}/auth/get-permission`, {
+    const response = await fetch(`${getApiBaseUrl()}/erp/${getTenant()}/auth/get-permission`, {
       credentials: 'include',
     });
 
@@ -62,7 +199,7 @@ const refreshTokens = async () => {
   try {
     console.log('[AUTH REFRESH] Calling /auth/token');
 
-    const response = await fetch(`${API_BASE_URL}/erp/${TENANT}/auth/token`, {
+    const response = await fetch(`${getApiBaseUrl()}/erp/${getTenant()}/auth/token`, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -99,11 +236,16 @@ const refreshTokens = async () => {
 const redirectToLogin = () => {
   console.log('========== [AUTH REDIRECT START] ==========');
 
-  const tenantName = localStorage.getItem('tenantName') || TENANT || 'default';
+  // Remember the page the user is on so they land back on it after login.
+  rememberReturnTo();
+
+  const apiBaseUrl = getApiBaseUrl();
+  const configTenant = getTenant();
+  const tenantName = localStorage.getItem('tenantName') || configTenant || 'default';
 
   console.log('[AUTH REDIRECT] tenantName:', tenantName);
-  console.log('[AUTH REDIRECT] TENANT:', TENANT);
-  console.log('[AUTH REDIRECT] API_BASE_URL:', API_BASE_URL);
+  console.log('[AUTH REDIRECT] config tenant:', configTenant);
+  console.log('[AUTH REDIRECT] apiBaseUrl:', apiBaseUrl);
 
   const rawTenantConfig = localStorage.getItem('tenantConfig');
 
@@ -117,37 +259,60 @@ const redirectToLogin = () => {
 
   console.log('[AUTH REDIRECT] auth config:', auth);
 
-  const cognitoDomain =
-    auth.cognitoDomain || 'https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com';
+  // window.config.auth sits between the per-tenant localStorage value and the
+  // hardcoded fallbacks, so each deployment can point at its own Cognito pool
+  // (and register the matching redirect_uri) without touching the bundle.
+  const configAuth = window.config?.auth || {};
 
-  const clientId = auth.clientId || '36t5q5ljl36405lcjfhajif16d';
+  const cognitoDomain =
+    auth.cognitoDomain ||
+    configAuth.cognitoDomain ||
+    'https://ap-south-1rxdtudilc.auth.ap-south-1.amazoncognito.com';
+
+  const clientId = auth.clientId || configAuth.clientId || '36t5q5ljl36405lcjfhajif16d';
 
   console.log('[AUTH REDIRECT] cognitoDomain:', cognitoDomain);
   console.log('[AUTH REDIRECT] clientId:', clientId);
 
-  const isLocalDev = API_BASE_URL.includes('localhost') || process.env.NODE_ENV === 'development';
+  const isLocalDev = String(apiBaseUrl).includes('localhost') || process.env.NODE_ENV === 'development';
 
   console.log('[AUTH REDIRECT] isLocalDev:', isLocalDev);
   console.log('[AUTH REDIRECT] NODE_ENV:', process.env.NODE_ENV);
 
+  // The callback is an erp-api endpoint, so it always lives on the API host.
+  // Previously this was null outside local dev, which made production login
+  // silently no-op below.
   const redirectUri =
     auth.redirectUri ||
-    (isLocalDev ? `${API_BASE_URL}/erp/${tenantName}/auth/cognito-callback` : null);
+    configAuth.redirectUri ||
+    `${apiBaseUrl}/erp/${tenantName}/auth/cognito-callback`;
 
-  console.log('[AUTH REDIRECT] auth.redirectUri:', auth.redirectUri);
   console.log('[AUTH REDIRECT] final redirectUri:', redirectUri);
-
   console.log('[AUTH REDIRECT] clientId exists:', !!clientId);
   console.log('[AUTH REDIRECT] redirectUri exists:', !!redirectUri);
 
   if (clientId && redirectUri) {
+    const currentPath = window.location.pathname + window.location.search + window.location.hash;
+
+    // "app=viewer" tells erp-api to send the browser back to the OHIF viewer
+    // host instead of the ERP portal's /callback.
+    //
+    // URLSearchParams escapes the "?" and "&" inside currentPath. Interpolating
+    // the raw path would truncate any deep link with 2+ query params, because
+    // erp-api re-parses `state` with URLSearchParams.
+    const state = new URLSearchParams({
+      tenant: tenantName,
+      app: 'viewer',
+      returnTo: currentPath,
+    }).toString();
+
     const loginUrl =
       `${cognitoDomain}/login` +
       `?client_id=${clientId}` +
       `&response_type=code` +
       `&scope=email+openid+phone` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&state=${encodeURIComponent(`tenant=${tenantName}`)}`;
+      `&state=${encodeURIComponent(state)}`;
 
     console.log('[AUTH REDIRECT] FINAL LOGIN URL:', loginUrl);
     console.log('[AUTH REDIRECT] Redirecting to Cognito login...');
@@ -173,55 +338,13 @@ const redirectToLogin = () => {
 // ────────────────────────────────────────────────
 // Enhanced Fetch with 401 Refresh Logic
 // ────────────────────────────────────────────────
-// const authFetch = async (url, options = {}) => {
-//   let response = await fetch(url, {
-//     ...options,
-//     credentials: 'include',
-//   });
-
-//   // Handle 401 → the Cognito access token (cookie) expired.
-//   // Refresh it via /auth/token and retry the original request.
-//   if (response.status === 401) {
-//     if (isRefreshing) {
-//       // Wait for the ongoing refresh, then retry
-//       await new Promise((resolve, reject) => {
-//         failedQueue.push({ resolve, reject });
-//       });
-//       return authFetch(url, options);
-//     }
-
-//     try {
-//       await refreshTokens();
-//       // Retry original request with the fresh cookie
-//       response = await fetch(url, {
-//         ...options,
-//         credentials: 'include',
-//       });
-//     } catch (refreshError) {
-//       console.error('[AUTH FETCH] Refresh failed → redirecting to login');
-//       redirectToLogin();
-//       throw refreshError;
-//     }
-//   }
-
-//   // Handle 403
-//   if (response.status === 403) {
-//     window.location.href = '/access-denied';
-//     throw new Error('Access Denied');
-//   }
-
-//   if (!response.ok) {
-//     throw new Error(`HTTP error! status: ${response.status}`);
-//   }
-
-//   return response.json();
-// };
-
 const authFetch = async (url, options = {}) => {
   console.log('[AUTH FETCH] Request:', url);
 
+  const requestOptions = { ...options };
+
   let response = await fetch(url, {
-    ...options,
+    ...requestOptions,
     credentials: 'include',
   });
 
@@ -234,6 +357,15 @@ const authFetch = async (url, options = {}) => {
     console.log('[AUTH FETCH] 401 detected:', url);
     console.log('[AUTH FETCH] isRefreshing:', isRefreshing);
 
+    // A refresh only ever buys one retry. Without this a request that keeps
+    // 401ing recurses through the refresh path forever.
+    if (requestOptions.__retried) {
+      console.error('[AUTH FETCH] 401 after refresh, giving up:', url);
+      clearReturnTo();
+      redirectToLogin();
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     if (isRefreshing) {
       console.log('[AUTH FETCH] Waiting for existing refresh');
 
@@ -241,7 +373,7 @@ const authFetch = async (url, options = {}) => {
         failedQueue.push({ resolve, reject });
       });
 
-      return authFetch(url, options);
+      return authFetch(url, { ...requestOptions, __retried: true });
     }
 
     try {
@@ -250,22 +382,32 @@ const authFetch = async (url, options = {}) => {
       await refreshTokens();
 
       console.log('[AUTH FETCH] Token refresh successful');
-
-      response = await fetch(url, {
-        ...options,
-        credentials: 'include',
-      });
-
-      console.log('[AUTH FETCH] Retry response:', {
-        url,
-        status: response.status,
-      });
     } catch (refreshError) {
       console.error('[AUTH FETCH] Refresh failed → redirecting to login', refreshError);
 
       redirectToLogin();
       throw refreshError;
     }
+
+    // refreshTokens() rotates permToken, so the retry must re-read it from
+    // storage. requestOptions.headers still holds the pre-refresh value, which
+    // is why the old retry kept 401ing.
+    const freshUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    response = await fetch(url, {
+      ...requestOptions,
+      __retried: true,
+      credentials: 'include',
+      headers: {
+        ...requestOptions.headers,
+        ...(freshUser?.permToken ? { 'x-perm': freshUser.permToken } : {}),
+      },
+    });
+
+    console.log('[AUTH FETCH] Retry response:', {
+      url,
+      status: response.status,
+    });
   }
 
   if (response.status === 403) {
@@ -277,6 +419,9 @@ const authFetch = async (url, options = {}) => {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
+  // Authenticated - the restored deep link has served its purpose.
+  clearReturnTo();
+
   return response.json();
 };
 
@@ -285,7 +430,7 @@ const authFetch = async (url, options = {}) => {
 // ────────────────────────────────────────────────
 class ApiService {
   constructor(userId) {
-    this.baseUrl = `${API_BASE_URL}/erp/${TENANT}/dicom`;
+    this.baseUrl = `${getApiBaseUrl()}/erp/${getTenant()}/dicom`;
     this.userId = userId;
   }
 
@@ -366,7 +511,7 @@ class ApiService {
   // ────────────────────────────────────────────────
   _hmsUrl() {
     // HMS routes are mounted at /erp/:tenant/hms on the same server
-    return `${API_BASE_URL}/erp/${TENANT}/hms`;
+    return `${getApiBaseUrl()}/erp/${getTenant()}/hms`;
   }
 
   async getTemplates(limit = 10, pagenumber = 1, departmentId = null) {
@@ -441,7 +586,7 @@ class ApiService {
   }
 
   async getTenantSettings() {
-    return authFetch(`${API_BASE_URL}/erp/${TENANT}/settings`, {
+    return authFetch(`${getApiBaseUrl()}/erp/${getTenant()}/settings`, {
       headers: this._permissionHeaders(),
     });
   }

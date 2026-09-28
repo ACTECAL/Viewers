@@ -17,8 +17,15 @@ import React from 'react';
  */
 import { modes as defaultModes, extensions as defaultExtensions } from './pluginImports';
 import loadDynamicConfig from './loadDynamicConfig';
+import { restoreReturnTo } from '../../../extensions/actecal-erp/src/services/ApiService';
 export { history } from './utils/history';
 export { preserveQueryParameters, preserveQueryStrings } from './utils/preserveQueryParameters';
+
+// If the last visit bounced through Cognito, put the browser back on the page
+// the user left. Must run before root.render() and before the actecal-erp
+// preRegistration reads window.location.search for the study UIDs. Synchronous
+// and a no-op when there is nothing to restore.
+restoreReturnTo();
 
 loadDynamicConfig(window.config).then(config_json => {
   // Reset Dynamic config if defined
