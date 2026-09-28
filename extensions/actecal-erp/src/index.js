@@ -224,6 +224,24 @@ function parseMeasurementText(primary) {
   };
 }
 
+// csTools targetIds used as cachedStats keys (and metadata.referencedImageId)
+// must be in "imageId:<id>"/"volumeId:<id>"/"videoId:<id>" form, otherwise the
+// tools throw: 'getTargetIdImage: targetId must start with "imageId:" or "volumeId:"'.
+// Stored measurements may contain the raw imageId, so normalize it here.
+function normalizeTargetId(referencedImageId) {
+  if (!referencedImageId) {
+    return referencedImageId;
+  }
+  if (
+    referencedImageId.startsWith('imageId:') ||
+    referencedImageId.startsWith('volumeId:') ||
+    referencedImageId.startsWith('videoId:')
+  ) {
+    return referencedImageId;
+  }
+  return `imageId:${referencedImageId}`;
+}
+
 // Resolve the imageId (and series/study) for a SOPInstanceUID by scanning the
 // loaded display sets of the study.
 function resolveImageReference(displaySetService, studyUid, sopInstanceUid) {
@@ -333,10 +351,26 @@ function hydrateMeasurement(
     return;
   }
 
+  // Normalize the id so cachedStats keys / metadata respect csTools targetId
+  // format ("imageId:" / "volumeId:" / "videoId:").
+  const targetId = normalizeTargetId(referencedImageId);
+
   const parsed = parseMeasurementText(data.displayText?.primary);
   const cachedStats = parsed
-    ? { [referencedImageId]: { length: parsed.length, unit: parsed.unit } }
+    ? { [targetId]: { length: parsed.length, unit: parsed.unit } }
     : {};
+
+  const points = Array.isArray(data.points)
+    ? data.points.map(point => {
+        if (point && typeof point === 'object' && point.referencedImageId) {
+          const normalizedPointId = normalizeTargetId(point.referencedImageId);
+          if (normalizedPointId !== point.referencedImageId) {
+            return { ...point, referencedImageId: normalizedPointId };
+          }
+        }
+        return point;
+      })
+    : data.points;
 
   const annotationObject = {
     annotationUID: data.uid,
@@ -344,7 +378,7 @@ function hydrateMeasurement(
     metadata: {
       toolName,
       FrameOfReferenceUID: data.FrameOfReferenceUID,
-      referencedImageId,
+      referencedImageId: targetId,
       SOPInstanceUID: data.SOPInstanceUID,
       SeriesInstanceUID: seriesInstanceUID,
       StudyInstanceUID: studyInstanceUID,
@@ -352,7 +386,7 @@ function hydrateMeasurement(
     data: {
       label: data.label || '',
       handles: {
-        points: data.points,
+        points,
         textBox: data.textBox,
       },
       cachedStats,

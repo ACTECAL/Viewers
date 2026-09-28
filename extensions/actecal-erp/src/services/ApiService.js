@@ -423,6 +423,60 @@ class ApiService {
     console.log('[scribe] getRecordingConfig response:', res);
     return res;
   }
+
+  // ────────────────────────────────────────────────
+  // AI credit (same pattern as send-message credit checks on the backend:
+  // balance is read from the tenant settings and consumed atomically).
+  // ────────────────────────────────────────────────
+
+  _permissionHeaders() {
+    const headers = {};
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      if (currentUser.permToken) headers['x-perm'] = currentUser.permToken;
+    } catch (err) {
+      console.warn('[AI CREDIT] Could not read permToken:', err);
+    }
+    return headers;
+  }
+
+  async getTenantSettings() {
+    return authFetch(`${API_BASE_URL}/erp/${TENANT}/settings`, {
+      headers: this._permissionHeaders(),
+    });
+  }
+
+  async getAiCredits() {
+    try {
+      const settings = await this.getTenantSettings();
+      const aiBalance =
+        typeof settings?.aiBalance === 'number'
+          ? settings.aiBalance
+          : Number(settings?.aiBalance ?? 0) || 0;
+      return { available: aiBalance, settings };
+    } catch (error) {
+      console.warn('[AI CREDIT] Failed to load tenant settings:', error);
+      return { available: null, settings: null, error };
+    }
+  }
+
+  async consumeAiCredit() {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...this._permissionHeaders(),
+    };
+    if (this.userId) headers['x-user-id'] = this.userId;
+    try {
+      return await authFetch(`${this.baseUrl}/ai-credit/consume`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.warn('[AI CREDIT] consumeAiCredit failed (endpoint may not be deployed):', error);
+      return null;
+    }
+  }
 }
 
 export default ApiService;

@@ -2,11 +2,25 @@
 
 window.config = {
   name: 'config/default.js',
-  apiBaseUrl:`https://api-dev.actecal.com`,
-    tenant:
-    'autolight',
-  iotCoreBaseUrl:`https://api-dev.actecal.com`,
+  // apiBaseUrl:`https://api-dev.actecal.com`,
+  apiBaseUrl: `http://localhost:4000`,
+  tenant: 'autolight',
+  iotCoreBaseUrl: `https://api-dev.actecal.com`,
   routerBasename: null,
+  ai: {
+    enabled: true,
+    // Swappable AI provider + model. Change these any time without code changes.
+    provider: 'gemini',
+    // MedGemma (medical vision-language model) used through the Gemini API.
+    // Other Gemini models / providers can be added to the list below.
+    defaultModel: 'medgemma',
+    models: ['medgemma', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+    apiKey: 'djjfhjhfjdksjadyeuyeiruygdgsaJIAZ',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    temperature: 0.2,
+    // Set false to check credits but not deduct (if backend endpoint below is not deployed).
+    deductCredit: true,
+  },
   // whiteLabeling: {},
   extensions: [],
   modes: [],
@@ -125,16 +139,16 @@ window.config = {
         // qidoRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
         // wadoRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
 
-          wadoUriRoot:
-    'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
+        wadoUriRoot:
+          'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
 
-  qidoRoot:
-    'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
+        qidoRoot:
+          'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
 
-  wadoRoot:
-    'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
+        wadoRoot:
+          'https://healthcare.googleapis.com/v1/projects/hms-viewer/locations/asia-south1/datasets/hms_dataset/dicomStores/hms_dicom_store/dicomWeb',
 
-    qidoSupportsIncludeField: false,
+        qidoSupportsIncludeField: false,
         imageRendering: 'wadors',
         thumbnailRendering: 'wadors',
         enableStudyLazyLoad: true,
@@ -276,22 +290,63 @@ window.config = {
               xmlns: 'http://www.w3.org/2000/svg',
               viewBox: '0 0 100 100',
               className: 'w-9 h-9',
-              key: 'logo-svg'
+              key: 'logo-svg',
             },
             [
-              React.createElement('rect', { x: '15', y: '40', width: '10', height: '20', rx: '5', fill: '#5ACCE6', opacity: '0.6', key: 'r1' }),
-              React.createElement('rect', { x: '35', y: '25', width: '10', height: '50', rx: '5', fill: '#0D6EFD', opacity: '0.8', key: 'r2' }),
-              React.createElement('rect', { x: '55', y: '10', width: '10', height: '80', rx: '5', fill: '#FFFFFF', key: 'r3' }),
-              React.createElement('rect', { x: '75', y: '30', width: '10', height: '40', rx: '5', fill: '#5ACCE6', key: 'r4' })
+              React.createElement('rect', {
+                x: '15',
+                y: '40',
+                width: '10',
+                height: '20',
+                rx: '5',
+                fill: '#5ACCE6',
+                opacity: '0.6',
+                key: 'r1',
+              }),
+              React.createElement('rect', {
+                x: '35',
+                y: '25',
+                width: '10',
+                height: '50',
+                rx: '5',
+                fill: '#0D6EFD',
+                opacity: '0.8',
+                key: 'r2',
+              }),
+              React.createElement('rect', {
+                x: '55',
+                y: '10',
+                width: '10',
+                height: '80',
+                rx: '5',
+                fill: '#FFFFFF',
+                key: 'r3',
+              }),
+              React.createElement('rect', {
+                x: '75',
+                y: '30',
+                width: '10',
+                height: '40',
+                rx: '5',
+                fill: '#5ACCE6',
+                key: 'r4',
+              }),
             ]
           ),
           React.createElement(
             'div',
             { className: 'flex flex-col justify-center ml-2', key: 'logo-text' },
             [
-              React.createElement('span', { className: 'text-[20px] font-bold text-white leading-none tracking-widest', key: 't1' }, 'SPECTRA')
+              React.createElement(
+                'span',
+                {
+                  className: 'text-[20px] font-bold text-white leading-none tracking-widest',
+                  key: 't1',
+                },
+                'SPECTRA'
+              ),
             ]
-          )
+          ),
         ]
       );
     },
