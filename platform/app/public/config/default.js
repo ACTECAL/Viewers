@@ -2,8 +2,8 @@
 
 window.config = {
   name: 'config/default.js',
-  apiBaseUrl: `https://api-dev.actecal.com`,
-  // apiBaseUrl: `http://localhost:4000`,
+  // apiBaseUrl: `https://api-dev.actecal.com`,
+  apiBaseUrl: `http://localhost:4000`,
   tenant: 'autolight',
   iotCoreBaseUrl: `https://api-dev.actecal.com`,
   routerBasename: null,

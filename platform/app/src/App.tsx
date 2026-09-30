@@ -78,12 +78,21 @@ function App({
     const urlParams = new URLSearchParams(window.location.search);
     const userId = urlParams.get('userid') || urlParams.get('userId');
     const guestToken = urlParams.get('guestToken');
+    const tenant = urlParams.get('tenant');
     
     if (userId) {
       localStorage.setItem('actecal_userId', userId);
     }
     if (guestToken) {
       sessionStorage.setItem('actecal_guestToken', guestToken);
+    }
+    // The ERP launches the viewer with ?tenant=... (Receipt.js) but localStorage
+    // is scoped to this origin, so without persisting it every API call fell back
+    // to the build-time window.config.tenant. ApiService reads this back. The
+    // slug guard keeps a malformed value from turning into a 500 from erp-api's
+    // getTenantInfo on every request.
+    if (tenant && /^[a-z0-9][a-z0-9-]{0,62}$/i.test(tenant)) {
+      localStorage.setItem('tenantName', tenant);
     }
 
     const run = async () => {

@@ -2,7 +2,54 @@
 // platform/app/src/index.js), so it is read on every call rather than captured
 // at import time - otherwise a late import freezes a stale apiBaseUrl/tenant.
 const getApiBaseUrl = () => window.config?.apiBaseUrl;
-const getTenant = () => window.config?.tenant;
+
+// ────────────────────────────────────────────────
+// Tenant + user resolution
+//
+// The ERP launches the viewer with ?tenant=... (see Receipt.js handleOpenDicom)
+// and ?userId=.... localStorage is scoped to this origin, so both arrive empty
+// on a cold open - every API call used to fall back to the build-time
+// window.config.tenant, which is only correct for the tenant that was hardcoded
+// at build time. App.tsx persists ?tenant= into localStorage.tenantName during
+// bootstrap; this is the read side of that.
+//
+// The slug guard is deliberately strict: a bad ?tenant= would make erp-api's
+// getTenantInfo 500 on every request, which is a worse failure than falling
+// back to the configured tenant.
+// ────────────────────────────────────────────────
+const TENANT_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/i;
+
+const getTenant = () => {
+  let stored = null;
+
+  try {
+    stored = localStorage.getItem('tenantName');
+  } catch (err) {
+    // storage unavailable (private mode, quota, ...) - fall through to config
+  }
+
+  if (stored && TENANT_PATTERN.test(stored)) {
+    return stored;
+  }
+
+  if (stored) {
+    console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+  }
+
+  return window.config?.tenant;
+};
+
+// userId arrives via ?userId= and is written to storage by App.tsx. Falling back
+// to it here matters because several call sites construct ApiService with no
+// argument, and endpoints such as /dicom/gcp-token answer 401 without x-user-id
+// - which used to bounce the viewer straight back into the login redirect.
+const getStoredUserId = () => {
+  try {
+    return localStorage.getItem('actecal_userId') || undefined;
+  } catch (err) {
+    return undefined;
+  }
+};
 
 // ────────────────────────────────────────────────
 // Return-To Latch
@@ -18,6 +65,15 @@ const getTenant = () => window.config?.tenant;
 const RETURN_TO_KEY = 'actecal_auth_returnTo';
 const RETURN_TO_TTL_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 2;
+
+// One Cognito round trip is the healthy path (401 -> refresh -> login -> back).
+// A couple of retries absorbs a session that expired mid-redirect. Past this the
+// user is not getting in, and continuing to bounce them between Cognito and the
+// viewer is the endless "logs in, sees login again" cycle this guard exists to
+// stop. Kept above MAX_LOGIN_ATTEMPTS so the deep link is dropped first and the
+// hard stop is the last resort.
+const LOGIN_ATTEMPTS_KEY = 'actecal_auth_loginAttempts';
+const MAX_LOGIN_REDIRECTS = 3;
 
 // Only same-origin paths may be restored: leading "/" but not "//", which
 // browsers treat as protocol-relative (an open redirect).
@@ -64,6 +120,30 @@ export const clearReturnTo = () => {
     sessionStorage.removeItem(RETURN_TO_KEY);
   } catch (err) {
     // ignore - storage unavailable (private mode, quota, ...)
+  }
+};
+
+const readLoginAttempts = () => {
+  try {
+    return Number(sessionStorage.getItem(LOGIN_ATTEMPTS_KEY) || 0) || 0;
+  } catch (err) {
+    return 0;
+  }
+};
+
+const writeLoginAttempts = count => {
+  try {
+    sessionStorage.setItem(LOGIN_ATTEMPTS_KEY, String(count));
+  } catch (err) {
+    // ignore - storage unavailable
+  }
+};
+
+const clearLoginAttempts = () => {
+  try {
+    sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+  } catch (err) {
+    // ignore - storage unavailable
   }
 };
 
@@ -116,11 +196,26 @@ export const restoreReturnTo = () => {
   }
 
   const entry = readReturnTo();
+  const attempts = entry?.attempts || 0;
+
+  // The ?returnTo= query arrives fresh on every pass through the callback, so it
+  // used to be a permanent bypass: each bounce restored the deep link and reset
+  // the counter, and the viewer could never leave the loop no matter how many
+  // attempts had already failed. Once the cap is hit the deep link is abandoned
+  // and the app boots at "/" instead.
+  if (attempts >= MAX_LOGIN_ATTEMPTS) {
+    console.warn(
+      '[RETURN TO] Attempt limit reached, abandoning deep link',
+      entry?.url
+    );
+    clearReturnTo();
+
+    return null;
+  }
 
   if (entry) {
-    // Tick the attempt counter regardless of which source was used, so the
-    // redirect loop stays bounded.
-    writeReturnTo({ ...entry, attempts: (entry.attempts || 0) + 1 });
+    // Tick the attempt counter so the redirect loop stays bounded.
+    writeReturnTo({ ...entry, attempts: attempts + 1 });
   }
 
   const target = isSafeReturnTo(fromQuery) ? fromQuery : entry?.url;
@@ -236,6 +331,30 @@ const refreshTokens = async () => {
 const redirectToLogin = () => {
   console.log('========== [AUTH REDIRECT START] ==========');
 
+  // Bound the cycle. Every 401 that cannot be refreshed lands here, so without a
+  // cap a viewer that cannot authenticate re-enters Cognito forever and the user
+  // just sees the login page repeat. Releasing the deep link and booting at "/"
+  // puts them back in control (the viewer can be opened again from the ERP).
+  const loginAttempts = readLoginAttempts();
+
+  if (loginAttempts >= MAX_LOGIN_REDIRECTS) {
+    console.error(
+      '[AUTH REDIRECT] Redirect limit reached, not sending to Cognito again',
+      { loginAttempts }
+    );
+    console.log('========== [AUTH REDIRECT END] ==========');
+    clearReturnTo();
+    clearLoginAttempts();
+
+    if (window.location.pathname !== '/') {
+      window.location.replace('/');
+    }
+
+    return;
+  }
+
+  writeLoginAttempts(loginAttempts + 1);
+
   // Remember the page the user is on so they land back on it after login.
   rememberReturnTo();
 
@@ -295,7 +414,11 @@ const redirectToLogin = () => {
     const currentPath = window.location.pathname + window.location.search + window.location.hash;
 
     // "app=viewer" tells erp-api to send the browser back to the OHIF viewer
-    // host instead of the ERP portal's /callback.
+    // host instead of the ERP portal's /callback. "origin" tells it which host
+    // that is: without it the backend has to rebuild the host from the tenant,
+    // which drops the browser on a different subdomain. localStorage is scoped
+    // per origin, so that swap silently discarded the userId stored here and the
+    // viewer came back unable to call the API.
     //
     // URLSearchParams escapes the "?" and "&" inside currentPath. Interpolating
     // the raw path would truncate any deep link with 2+ query params, because
@@ -304,6 +427,7 @@ const redirectToLogin = () => {
       tenant: tenantName,
       app: 'viewer',
       returnTo: currentPath,
+      origin: window.location.origin,
     }).toString();
 
     const loginUrl =
@@ -419,8 +543,10 @@ const authFetch = async (url, options = {}) => {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  // Authenticated - the restored deep link has served its purpose.
+  // Authenticated - the restored deep link has served its purpose, and the
+  // session works, so the redirect counter is reset for any future expiry.
   clearReturnTo();
+  clearLoginAttempts();
 
   return response.json();
 };
@@ -431,7 +557,7 @@ const authFetch = async (url, options = {}) => {
 class ApiService {
   constructor(userId) {
     this.baseUrl = `${getApiBaseUrl()}/erp/${getTenant()}/dicom`;
-    this.userId = userId;
+    this.userId = userId ?? getStoredUserId();
   }
 
   async getWorklist(userId = null) {

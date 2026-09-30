@@ -35,42 +35,75 @@ function createActecalApiDataSource(actecalConfig, userAuthenticationService, ex
 
       if (!token || !dicomStorePath) {
           const userId = localStorage.getItem('actecal_userId');
-          const { apiBaseUrl, tenant } = window.config;
-          const baseUrl = `${apiBaseUrl}/erp/${tenant}/dicom`;
+          const guestToken = sessionStorage.getItem('actecal_guestToken');
+          const apiService = new ApiService(userId);
 
           try {
-             const headers = { 'x-user-id': userId };
-             const guestToken = sessionStorage.getItem('actecal_guestToken');
-             if (guestToken) headers['Authorization'] = `Bearer ${guestToken}`;
+              let contexts;
+              let tokenData;
 
-             const [contextRes, tokenRes] = await Promise.all([
-                 fetch(`${baseUrl}/studies/context?uids=${studyInstanceUid}`, { credentials: 'include', headers }),
-                 fetch(`${baseUrl}/gcp-token?uids=${studyInstanceUid}`, { credentials: 'include', headers })
-             ]);
+              if (guestToken || !userId) {
+                // Two cases that must NOT be bounced into a Cognito redirect:
+                //
+                //  - guestToken: share/guest links authenticate with a Bearer
+                //    token rather than the Cognito session, and have no ERP user
+                //    to send back to Cognito.
+                //  - no userId: /dicom/gcp-token answers 401 without x-user-id
+                //    regardless of how healthy the session is, so redirecting
+                //    could never help. This is the ?sharecode= entry point
+                //    (extensions/actecal-erp/src/index.js), which carries no
+                //    userId, and it keeps its previous silent-failure behaviour.
+                const { apiBaseUrl, tenant } = window.config;
+                const baseUrl = `${apiBaseUrl}/erp/${tenant}/dicom`;
+                const headers = { 'x-user-id': userId };
 
-             if (contextRes.ok && tokenRes.ok) {
-                 const contexts = await contextRes.json();
-                 const tokenData = await tokenRes.json();
+                if (guestToken) headers['Authorization'] = `Bearer ${guestToken}`;
 
-                 if (contexts && contexts.studies && contexts.studies.length > 0) {
-                     dicomStorePath = contexts.studies[0].dicom_store_path;
-                 } else {
-                     dicomStorePath = contexts.dicomStorePath;
-                 }
-                 token = tokenData.access_token;
+                const [contextRes, tokenRes] = await Promise.all([
+                    fetch(`${baseUrl}/studies/context?uids=${studyInstanceUid}`, { credentials: 'include', headers }),
+                    fetch(`${baseUrl}/gcp-token?uids=${studyInstanceUid}`, { credentials: 'include', headers })
+                ]);
 
-                 // Store token with its expiry time (expires_in is in seconds)
-                 const expiresIn = tokenData.expires_in || 3600;
-                 const expiresAt = Date.now() + (expiresIn * 1000);
+                // Unchanged from before: only a fully successful pair is cached.
+                if (contextRes.ok && tokenRes.ok) {
+                    contexts = await contextRes.json();
+                    tokenData = await tokenRes.json();
+                }
+              } else {
+                // These two go through authFetch rather than a bare fetch on
+                // purpose. A 401 here used to be swallowed: no token was
+                // injected, userAuthenticationService never got an
+                // implementation, and OHIF fell back to its own login screen
+                // with nothing triggering the Cognito redirect - so the user
+                // could see a login page and have no way past it. authFetch
+                // refreshes the session and, if that fails, sends them to Cognito.
+                [contexts, tokenData] = await Promise.all([
+                    apiService.fetchStudyContext(studyInstanceUid),
+                    apiService.getGCPToken(studyInstanceUid)
+                ]);
+              }
 
-                 sessionStorage.setItem(cacheKey, JSON.stringify({ token, dicomStorePath, expiresAt }));
-             }
+              if (contexts && tokenData) {
+                  if (contexts.studies && contexts.studies.length > 0) {
+                      dicomStorePath = contexts.studies[0].dicom_store_path;
+                  } else {
+                      dicomStorePath = contexts.dicomStorePath;
+                  }
+                  token = tokenData.access_token;
+
+                  // Store token with its expiry time (expires_in is in seconds)
+                  const expiresIn = tokenData.expires_in || 3600;
+                  const expiresAt = Date.now() + (expiresIn * 1000);
+
+                  sessionStorage.setItem(cacheKey, JSON.stringify({ token, dicomStorePath, expiresAt }));
+              }
           } catch (e) {
-             console.error("Failed to fetch context/token in data source initialize", e);
+              console.error("Failed to fetch context/token in data source initialize", e);
           }
       }
 
       if (token && dicomStorePath) {
+
           const gcpUrl = `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
 
           if (userAuthenticationService) {
