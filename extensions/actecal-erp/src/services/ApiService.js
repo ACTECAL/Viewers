@@ -77,7 +77,8 @@ const MAX_LOGIN_REDIRECTS = 3;
 
 // Only same-origin paths may be restored: leading "/" but not "//", which
 // browsers treat as protocol-relative (an open redirect).
-const isSafeReturnTo = url => typeof url === 'string' && url.startsWith('/') && !url.startsWith('//');
+const isSafeReturnTo = url =>
+  typeof url === 'string' && url.startsWith('/') && !url.startsWith('//');
 
 const readReturnTo = () => {
   try {
@@ -204,10 +205,7 @@ export const restoreReturnTo = () => {
   // attempts had already failed. Once the cap is hit the deep link is abandoned
   // and the app boots at "/" instead.
   if (attempts >= MAX_LOGIN_ATTEMPTS) {
-    console.warn(
-      '[RETURN TO] Attempt limit reached, abandoning deep link',
-      entry?.url
-    );
+    console.warn('[RETURN TO] Attempt limit reached, abandoning deep link', entry?.url);
     clearReturnTo();
 
     return null;
@@ -228,7 +226,9 @@ export const restoreReturnTo = () => {
   // This also drops ?returnTo=, since the target is the deep link itself.
   window.history.replaceState(window.history.state, '', target);
 
-  console.log(`[RETURN TO] Restored ${target} (source: ${isSafeReturnTo(fromQuery) ? 'query' : 'latch'})`);
+  console.log(
+    `[RETURN TO] Restored ${target} (source: ${isSafeReturnTo(fromQuery) ? 'query' : 'latch'})`
+  );
 
   return target;
 };
@@ -338,10 +338,9 @@ const redirectToLogin = () => {
   const loginAttempts = readLoginAttempts();
 
   if (loginAttempts >= MAX_LOGIN_REDIRECTS) {
-    console.error(
-      '[AUTH REDIRECT] Redirect limit reached, not sending to Cognito again',
-      { loginAttempts }
-    );
+    console.error('[AUTH REDIRECT] Redirect limit reached, not sending to Cognito again', {
+      loginAttempts,
+    });
     console.log('========== [AUTH REDIRECT END] ==========');
     clearReturnTo();
     clearLoginAttempts();
@@ -393,7 +392,8 @@ const redirectToLogin = () => {
   console.log('[AUTH REDIRECT] cognitoDomain:', cognitoDomain);
   console.log('[AUTH REDIRECT] clientId:', clientId);
 
-  const isLocalDev = String(apiBaseUrl).includes('localhost') || process.env.NODE_ENV === 'development';
+  const isLocalDev =
+    String(apiBaseUrl).includes('localhost') || process.env.NODE_ENV === 'development';
 
   console.log('[AUTH REDIRECT] isLocalDev:', isLocalDev);
   console.log('[AUTH REDIRECT] NODE_ENV:', process.env.NODE_ENV);

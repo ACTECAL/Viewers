@@ -224,11 +224,19 @@ function parseMeasurementText(primary) {
   };
 }
 
-// csTools targetIds used as cachedStats keys (and metadata.referencedImageId)
-// must be in "imageId:<id>"/"volumeId:<id>"/"videoId:<id>" form, otherwise the
-// tools throw: 'getTargetIdImage: targetId must start with "imageId:" or "volumeId:"'.
-// Stored measurements may contain the raw imageId, so normalize it here.
-function normalizeTargetId(referencedImageId) {
+// csTools targetIds used as cachedStats keys are in "imageId:<id>"/"volumeId:<id>"/
+// "videoId:<id>" form, so the tools throw: 'getTargetIdImage: targetId must start
+// with "imageId:" or "volumeId:"' otherwise.
+// NOTE: this prefix is ONLY valid for cachedStats keys. Annotation
+// `metadata.referencedImageId` must stay the raw cornerstone imageId
+// ("wadors:..."), because that is what csTools itself stores
+// (AnnotationTool.hydrateBase -> viewport.getImageIds()[i]) and what
+// StackViewport.isReferenceViewable compares against getCurrentImageId().
+// OHIF's MetadataProvider.getUIDsFromImageID() also only parses ids starting
+// with "wadors:", so a prefixed id makes
+// cornerstone.metaData.get('instance', id) return undefined and the whole
+// hydration silently fails.
+function toTargetId(referencedImageId) {
   if (!referencedImageId) {
     return referencedImageId;
   }
@@ -242,18 +250,36 @@ function normalizeTargetId(referencedImageId) {
   return `imageId:${referencedImageId}`;
 }
 
+// Inverse of toTargetId: recovers the raw cornerstone imageId from a stored
+// targetId so legacy rows saved with a prefix still resolve.
+function stripTargetIdPrefix(referencedImageId) {
+  if (!referencedImageId) {
+    return referencedImageId;
+  }
+  const match = /^(?:imageId|volumeId|videoId):(.*)$/.exec(referencedImageId);
+  return match ? match[1] : referencedImageId;
+}
+
 // Resolve the imageId (and series/study) for a SOPInstanceUID by scanning the
-// loaded display sets of the study.
-function resolveImageReference(displaySetService, studyUid, sopInstanceUid) {
+// loaded display sets of the study. The display set always owns the canonical
+// imageIds that the viewport and the metadata provider use, so this is
+// preferred over anything persisted on the measurement row.
+function resolveImageReference(displaySetService, studyUid, sopInstanceUid, seriesInstanceUid) {
   if (!sopInstanceUid) {
     return null;
   }
 
   let displaySets = [];
   try {
-    displaySets = displaySetService.getDisplaySetsBy(
-      ds => ds.StudyInstanceUID === studyUid
-    );
+    displaySets = displaySetService.getDisplaySetsBy(ds => {
+      if (studyUid && ds.StudyInstanceUID !== studyUid) {
+        return false;
+      }
+      if (seriesInstanceUid && ds.SeriesInstanceUID !== seriesInstanceUid) {
+        return false;
+      }
+      return true;
+    });
   } catch (e) {
     displaySets = displaySetService.activeDisplaySets || [];
   }
@@ -272,7 +298,7 @@ function resolveImageReference(displaySetService, studyUid, sopInstanceUid) {
 
     if (referencedImageId) {
       return {
-        referencedImageId,
+        referencedImageId: stripTargetIdPrefix(referencedImageId),
         SOPInstanceUID: sopInstanceUid,
         SeriesInstanceUID: ds.SeriesInstanceUID || instances[idx]?.SeriesInstanceUID,
         StudyInstanceUID: ds.StudyInstanceUID || studyUid,
@@ -303,6 +329,16 @@ function hydrateMeasurement(
     return;
   }
 
+  // Never hydrate a row that belongs to a different study, even if the API or a
+  // realtime push hands it to us.
+  const rowStudyUid = data.StudyInstanceUID || data.metadata?.StudyInstanceUID || m.study_instance_uid;
+  if (studyUid && rowStudyUid && rowStudyUid !== studyUid) {
+    console.warn(
+      `Skipping measurement '${data.uid}' from study '${rowStudyUid}' while hydrating '${studyUid}'`
+    );
+    return;
+  }
+
   const toolName = data.toolName;
   if (!toolName) {
     console.warn('Measurement has no toolName, skipping:', data);
@@ -329,21 +365,29 @@ function hydrateMeasurement(
     return;
   }
 
-  let referencedImageId = data.referencedImageId || data.metadata?.referencedImageId || null;
   let seriesInstanceUID = data.SeriesInstanceUID || data.metadata?.SeriesInstanceUID || null;
   let studyInstanceUID = data.StudyInstanceUID || data.metadata?.StudyInstanceUID || studyUid;
 
+  // Prefer the display set's own imageId: it is the exact string the viewport
+  // and OHIF's metadata provider are keyed on. Only fall back to whatever was
+  // persisted on the row.
+  const resolved = resolveImageReference(
+    displaySetService,
+    studyInstanceUID,
+    data.SOPInstanceUID,
+    seriesInstanceUID
+  );
+
+  let referencedImageId = resolved?.referencedImageId;
+  if (resolved) {
+    seriesInstanceUID = seriesInstanceUID || resolved.SeriesInstanceUID;
+    studyInstanceUID = resolved.StudyInstanceUID || studyInstanceUID;
+  }
+
   if (!referencedImageId) {
-    const resolved = resolveImageReference(
-      displaySetService,
-      studyInstanceUID,
-      data.SOPInstanceUID
+    referencedImageId = stripTargetIdPrefix(
+      data.referencedImageId || data.metadata?.referencedImageId || null
     );
-    if (resolved) {
-      referencedImageId = resolved.referencedImageId;
-      seriesInstanceUID = seriesInstanceUID || resolved.SeriesInstanceUID;
-      studyInstanceUID = studyInstanceUID || resolved.StudyInstanceUID;
-    }
   }
 
   if (!referencedImageId) {
@@ -351,9 +395,9 @@ function hydrateMeasurement(
     return;
   }
 
-  // Normalize the id so cachedStats keys / metadata respect csTools targetId
-  // format ("imageId:" / "volumeId:" / "videoId:").
-  const targetId = normalizeTargetId(referencedImageId);
+  // cachedStats keys must be csTools targetIds ("imageId:<id>"), but
+  // metadata.referencedImageId must stay the raw imageId.
+  const targetId = toTargetId(referencedImageId);
 
   const parsed = parseMeasurementText(data.displayText?.primary);
   const cachedStats = parsed
@@ -363,7 +407,7 @@ function hydrateMeasurement(
   const points = Array.isArray(data.points)
     ? data.points.map(point => {
         if (point && typeof point === 'object' && point.referencedImageId) {
-          const normalizedPointId = normalizeTargetId(point.referencedImageId);
+          const normalizedPointId = toTargetId(point.referencedImageId);
           if (normalizedPointId !== point.referencedImageId) {
             return { ...point, referencedImageId: normalizedPointId };
           }
@@ -378,7 +422,7 @@ function hydrateMeasurement(
     metadata: {
       toolName,
       FrameOfReferenceUID: data.FrameOfReferenceUID,
-      referencedImageId: targetId,
+      referencedImageId,
       SOPInstanceUID: data.SOPInstanceUID,
       SeriesInstanceUID: seriesInstanceUID,
       StudyInstanceUID: studyInstanceUID,
@@ -404,25 +448,51 @@ function hydrateMeasurement(
     dataSource
   );
 
-  // Color-code by owner: current user red, other doctors blue.
-  if (measurementUid) {
-    try {
-      annotation.config.style.setAnnotationStyles(measurementUid, {
-        color: getOwnerColor(m, getCurrentUserId()),
-      });
+  if (!measurementUid) {
+    // addRawMeasurement swallows mapping errors, so surface the most likely
+    // cause instead of silently rendering nothing.
+    console.warn(
+      `Failed to hydrate measurement '${data.uid}' (tool '${toolName}', imageId '${referencedImageId}')`
+    );
+    return;
+  }
 
-      if (cornerstoneViewportService) {
-        const renderingEngine = cornerstoneViewportService.getRenderingEngine();
-        const viewportIds = renderingEngine
-          ? renderingEngine.getViewports().map(viewport => viewport.id)
-          : [];
-        if (viewportIds.length) {
-          triggerAnnotationRenderForViewportIds(viewportIds);
-        }
+  // Surface the author so AnnotationFiltersPanel can group by owner instead of
+  // falling back to "Unknown".
+  try {
+    const owner = m && (m.created_by ?? m.createdBy);
+    if (owner != null) {
+      const stored = measurementService.getMeasurement(measurementUid);
+      if (stored) {
+        stored.createdBy = owner;
       }
-    } catch (err) {
-      console.warn('Failed to apply measurement color:', err);
     }
+  } catch (err) {
+    // Non-fatal: the annotation already exists and renders.
+  }
+
+  // Color-code by owner: current user red, other doctors blue. Render trigger
+  // lives in its own try/catch so a styling failure can't suppress the draw.
+  try {
+    annotation.config.style.setAnnotationStyles(measurementUid, {
+      color: getOwnerColor(m, getCurrentUserId()),
+    });
+  } catch (err) {
+    console.warn('Failed to apply measurement color:', err);
+  }
+
+  try {
+    if (cornerstoneViewportService) {
+      const renderingEngine = cornerstoneViewportService.getRenderingEngine();
+      const viewportIds = renderingEngine
+        ? renderingEngine.getViewports().map(viewport => viewport.id)
+        : [];
+      if (viewportIds.length) {
+        triggerAnnotationRenderForViewportIds(viewportIds);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to trigger annotation render:', err);
   }
 }
 
@@ -733,6 +803,13 @@ async function preRegistration({  extensionManager,
 
   const { measurementService } = servicesManager.services;
 
+  // hydrateMeasurement stamps the row author onto the measurement so
+  // AnnotationFiltersPanel can group by owner; register the key so the schema
+  // validation in addRawMeasurement doesn't reject it.
+  if (typeof measurementService.addMeasurementSchemaKeys === 'function') {
+    measurementService.addMeasurementSchemaKeys(['createdBy']);
+  }
+
   const measurementSource =
     measurementService.createSource(
       'actecal-erp',
@@ -757,38 +834,96 @@ async function preRegistration({  extensionManager,
   const { displaySetService, cornerstoneViewportService } = servicesManager.services;
   const loadedStudiesForMeasurements = new Set();
 
+  // uid -> studyInstanceUID, so a removal can still be tombstoned even when the
+  // measurement was replayed from the API instead of drawn in this session.
+  const measurementStudyMap = {};
+
+  // True while saved measurements are being replayed into cornerstone.
+  let isHydrating = false;
+
+  // csTools recalculates cachedStats on a throttle after addRawMeasurement
+  // (LengthTool fires StatsUpdated ~100ms later), so those MEASUREMENT_UPDATED
+  // events escape the synchronous isHydrating window and would be written back
+  // as new rows. Remember what we just replayed and ignore writes for a grace
+  // period; debouncedSaveMeasurement already waits 800ms.
+  const HYDRATION_SAVE_GRACE_MS = 3000;
+  const hydratedAt = {};
+
+  const isReplaying = uid => isHydrating || (uid != null && Date.now() - (hydratedAt[uid] || 0) < HYDRATION_SAVE_GRACE_MS);
+
+  const hydrateStudyMeasurements = async studyUid => {
+    console.log(`Loading measurements dynamically for study: ${studyUid}`);
+
+    // ensure apiService uses latest userId if available
+    const currentParams = parse(window.location.search);
+    const dynamicApiService = new ApiService(currentParams.userId || queryParams.userId);
+
+    const measurements = await dynamicApiService.fetchMeasurements(studyUid);
+    console.log(`Fetched ${measurements?.length ?? 0} measurements for ${studyUid}`);
+
+    const now = Date.now();
+
+    // Defensive: the API returns the latest row per annotation_uid, but a
+    // legacy/duplicate response would otherwise replay the same uid twice.
+    const byUid = new Map();
+    measurements?.forEach(measurement => {
+      const uid = measurement?.annotation_uid || measurement?.data?.uid;
+      if (!uid) {
+        return;
+      }
+      const previous = byUid.get(uid);
+      if (!previous || (measurement?.id || 0) > (previous.id || 0)) {
+        byUid.set(uid, measurement);
+      }
+    });
+
+    byUid.forEach((measurement, uid) => {
+      measurementStudyMap[uid] = studyUid;
+      hydratedAt[uid] = now;
+
+      try {
+        hydrateMeasurement(
+          measurementService,
+          displaySetService,
+          extensionManager,
+          cornerstoneViewportService,
+          studyUid,
+          measurement
+        );
+      } catch (err) {
+        // One malformed row must not abort the rest of the study.
+        console.warn(`Failed to hydrate measurement '${uid}' for ${studyUid}:`, err);
+      }
+    });
+  };
+
   displaySetService.subscribe(
     displaySetService.EVENTS.DISPLAY_SETS_ADDED,
     async ({ displaySetsAdded }) => {
       if (!displaySetsAdded || displaySetsAdded.length === 0) return;
 
-      const studyUid = displaySetsAdded[0].StudyInstanceUID;
-      if (!studyUid || loadedStudiesForMeasurements.has(studyUid)) return;
+      // A session can carry several studies (StudyInstanceUIDs=A,B), and one
+      // DISPLAY_SETS_ADDED batch can mix studies, so hydrate every study in the
+      // batch rather than just displaySetsAdded[0].
+      const studyUids = [...new Set(
+        displaySetsAdded.map(ds => ds?.StudyInstanceUID).filter(Boolean)
+      )].filter(studyUid => !loadedStudiesForMeasurements.has(studyUid));
 
-      loadedStudiesForMeasurements.add(studyUid);
+      if (!studyUids.length) return;
+      studyUids.forEach(studyUid => loadedStudiesForMeasurements.add(studyUid));
 
+      const previousHydrating = isHydrating;
+      isHydrating = true;
       try {
-        console.log(`Loading measurements dynamically for study: ${studyUid}`);
-
-        // ensure apiService uses latest userId if available
-        const currentParams = parse(window.location.search);
-        const dynamicApiService = new ApiService(currentParams.userId || queryParams.userId);
-
-        const measurements = await dynamicApiService.fetchMeasurements(studyUid);
-        console.log(`Fetched measurements dynamically:`, measurements);
-
-        measurements?.forEach(measurement => {
-          hydrateMeasurement(
-            measurementService,
-            displaySetService,
-            extensionManager,
-            cornerstoneViewportService,
-            studyUid,
-            measurement
-          );
-        });
-      } catch(err) {
-        console.error(`Failed to load measurements dynamically for ${studyUid}:`, err);
+        await Promise.all(
+          studyUids.map(studyUid =>
+            hydrateStudyMeasurements(studyUid).catch(err => {
+              console.error(`Failed to load measurements dynamically for ${studyUid}:`, err);
+            })
+          )
+        );
+      } finally {
+        isHydrating = previousHydrating;
       }
     }
   );
@@ -796,6 +931,7 @@ async function preRegistration({  extensionManager,
   // Clear cache if mode exits
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENTS_CLEARED, () => {
     loadedStudiesForMeasurements.clear();
+    Object.keys(hydratedAt).forEach(uid => delete hydratedAt[uid]);
   });
 
   // Hydrate real-time measurements received from other connected experts
@@ -820,14 +956,18 @@ async function preRegistration({  extensionManager,
       return;
     }
 
-    hydrateMeasurement(
-      measurementService,
-      displaySetService,
-      extensionManager,
-      cornerstoneViewportService,
-      studyUid,
-      measurement
-    );
+    try {
+      hydrateMeasurement(
+        measurementService,
+        displaySetService,
+        extensionManager,
+        cornerstoneViewportService,
+        studyUid,
+        measurement
+      );
+    } catch (err) {
+      console.warn('Failed to hydrate external measurement:', err);
+    }
   };
 
   window.addEventListener('actecal:externalMeasurement', (event) => {
@@ -841,8 +981,6 @@ async function preRegistration({  extensionManager,
   /* ---------------------------
      MEASUREMENT EVENTS
   ---------------------------- */
-
-  const measurementStudyMap = {};
 
   const formatPayload = (m, eventType) => {
     return {
@@ -881,11 +1019,17 @@ async function preRegistration({  extensionManager,
   };
 
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_ADDED, event => {
-    console.log("MEASUREMENT_ADDED:", event);
     const measurement = event?.measurement;
     const studyUid = measurement?.referenceStudyUID || measurement?.studyInstanceUid;
     if (studyUid) {
-      debouncedSaveMeasurement(studyUid, measurement, 'ADD');
+      measurementStudyMap[measurement.uid] = studyUid;
+
+      // A replayed row is already persisted, so don't write it back — but still
+      // dispatch below so the report/Lexical side sees it.
+      if (!isReplaying(measurement.uid)) {
+        console.log("MEASUREMENT_ADDED:", event);
+        debouncedSaveMeasurement(studyUid, measurement, 'ADD');
+      }
 
       // Dispatch custom event to inject into Lexical
       const customEvent = new CustomEvent('actecal:injectMeasurement', {
@@ -899,16 +1043,21 @@ async function preRegistration({  extensionManager,
     const measurement = event?.measurement;
     const studyUid = measurement?.referenceStudyUID || measurement?.studyInstanceUid;
     if (studyUid) {
+      if (isReplaying(measurement.uid)) {
+        return;
+      }
       debouncedSaveMeasurement(studyUid, measurement, 'UPDATE');
     }
   });
 
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_REMOVED, event => {
-    console.log("MEASUREMENT_REMOVED:", event);
     const annotationUID = typeof event.measurement === 'string' ? event.measurement : event.measurement?.uid;
     if (annotationUID) {
       const studyUid = measurementStudyMap[annotationUID];
       if (studyUid) {
+        // Event-log tombstone: the row stays in the DB but GET filters
+        // annotation_uid's latest row out when it is a DELETE.
+        console.log("MEASUREMENT_REMOVED:", event);
         apiService.saveMeasurement(studyUid, { uid: annotationUID, eventType: 'DELETE' }).catch(e => console.error('Delete failed', e));
         delete measurementStudyMap[annotationUID];
       }
