@@ -32,6 +32,37 @@ window.config = {
     // Set false to check credits but not deduct (if backend endpoint below is not deployed).
     deductCredit: true,
   },
+  // GPU AI / WebSocket transcription configuration
+  gpu: {
+    enabled: true,
+    // Base URL for GPU HTTP endpoints (analyze-dicom, update-dicom-measurement)
+    baseUrl: 'http://34.9.15.48:8000',
+    // Primary WebSocket URL for real-time transcription/report updates
+    wsUrl: 'ws://34.9.15.48:8000/ws/transcribe',
+    // NOT SENT: the GPU box accepts tokenless WS handshakes (verified). If it
+    // ever enforces JWT auth, provide the token here and re-add it to the
+    // socket URL in ScribeSocketService.buildUrl().
+    authToken: '',
+    timeoutMs: 60000,
+    modality: 'CT',
+  },
+  // Clinical scribe (transcription/report) configuration
+  scribe: {
+    transcribeBaseUrl: 'https://transcribe-service-381629948277.asia-southeast1.run.app',
+    pollIntervalMs: 10000,
+    maxPollAttempts: 90,
+    socketConnectTimeoutMs: 5000,
+    // Sends {"action":"ping"} while the socket is open. Left at 0 (disabled)
+    // because the GPU transcribe WebSocket only documents end_meeting going out;
+    // set to e.g. 30000 once it has confirmed it tolerates/answers a ping.
+    wsHeartbeatMs: 0,
+    // Retry interval once the 1s..30s backoff ladder is exhausted, so a GPU box
+    // that is down for the whole consultation is not dialled every 30 seconds.
+    reconnectMaxIntervalMs: 120000,
+    // 0 = keep retrying for the whole consultation (default). Set a positive
+    // number to stop after that many attempts; REST polling runs either way.
+    maxReconnectAttempts: 0,
+  },
   // whiteLabeling: {},
   extensions: [],
   modes: [],

@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { useSystem } from '@ohif/core';
 import ApiService from '../services/ApiService';
 import useClinicalScribe from '../hooks/useClinicalScribe';
+import ScribeSocketService from '../services/ScribeSocketService';
 
 // Lexical imports
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -369,14 +370,43 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
   // effective visitId: recording-config visit_id takes priority, then
   // getAutoFillTemplate's visitId (falling back through either path).
   const finalVisitId = visitId || resolvedVisitId || '';
-  const {
-    startScribeSync,
-    finalizeConsultation,
-  } = useClinicalScribe({
+  // The GPU box keys its transcript session on department/test_type as well as
+  // tenant+visit, so forward the ids resolved from getAutoFillTemplate instead
+  // of letting the socket fall back to its generic defaults.
+  const handleLexicalApplied = useCallback((serialized: string) => {
+    if (!studyUid || !serialized) return;
+    try {
+      const instance = editorInstanceRef.current;
+      if (!instance) return;
+      // Keep the in-session cache in step with socket-pushed content, otherwise
+      // InitialStatePlugin restores a pre-push snapshot the next time the panel
+      // is collapsed and re-opened, silently losing the live report.
+      editorStateCache.set(studyUid, instance.parseEditorState(serialized));
+    } catch (err) {
+      console.warn('[scribe] could not cache pushed lexical state:', err);
+    }
+  }, [studyUid, editorInstanceRef]);
+  const { startScribeSync, finalizeConsultation, reportStatus, transport } = useClinicalScribe({
     tenantName,
     visitId: finalVisitId,
+    department: department || 'general',
+    testType: testType || 'consultation',
     editorInstanceRef,
+    onLexicalApplied: handleLexicalApplied,
   });
+
+  // Transport badge. The switch to REST polling is meant to be invisible to the
+  // doctor, but a silent handover is indistinguishable from "AI stopped
+  // working" - one glance at this is the difference between a support call and
+  // a five-second fix.
+  const transportBadge =
+    transport === 'websocket'
+      ? { label: 'Live (WS)', className: 'text-green-700 border-green-300 bg-green-50' }
+      : transport === 'polling'
+        ? { label: 'Fallback polling', className: 'text-amber-700 border-amber-300 bg-amber-50' }
+        : reportStatus === 'connecting'
+          ? { label: 'Connecting...', className: 'text-gray-500 border-gray-300 bg-gray-50' }
+          : null;
 
   // The MediaRecorder callback is created once (inside startRecording) and, on
   // its own, would keep capturing the scribe functions from the render where
@@ -449,6 +479,13 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
   // Webm/mp4 container header extracted from the first chunk, used to make
   // every subsequent chunk a standalone playable file (same as erp-ui).
   const containerHeaderRef = useRef<ArrayBuffer | null>(null);
+  // How many chunk indexes have been pushed to the GPU box WebSocket. Tracked
+  // separately from recordingChunkIndexRef so the socket can be replayed from
+  // recordingChunksRef on (re)connect without re-sending what already went out.
+  const wsSentCountRef = useRef(0);
+  // The mimeType the live MediaRecorder is producing, reused to rebuild buffered
+  // chunks for the WS catch-up flush.
+  const recordingMimeTypeRef = useRef<string>('audio/webm');
 
   const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string, basePath?: string, metadata: Record<string, string> = {}) => {
     const cfg = recordingConfigRef.current;
@@ -480,8 +517,12 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
     }
   };
 
-  const handleAudioChunk = async (blob: Blob, mimeType: string) => {
-    let uploadBlob = blob;
+  // Makes every MediaRecorder timeslice an independently playable webm/mp4 by
+  // prepending the container header extracted from the first chunk (same as
+  // erp-ui). Byte-identical output feeds both the GCS upload (Cloud API) and the
+  // GPU box WebSocket, so both see exactly the same audio.
+  const buildStandaloneChunk = useCallback(async (blob: Blob, mimeType: string) => {
+    let prepared = blob;
     try {
       if (!containerHeaderRef.current) {
         // First chunk carries the container header; extract it and keep the
@@ -493,12 +534,27 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
         }
       } else {
         // Prepend the saved header so every chunk is independently playable.
-        uploadBlob = await prependHeader(containerHeaderRef.current, blob, mimeType);
+        prepared = await prependHeader(containerHeaderRef.current, blob, mimeType);
       }
     } catch (err) {
-      console.error('Failed to build standalone chunk, uploading raw:', err);
-      uploadBlob = blob;
+      console.error('Failed to build standalone chunk, using raw:', err);
     }
+    return prepared;
+  }, []);
+
+  // Pushes one standalone chunk to the GPU box as a binary WS frame, keeping
+  // wsSentCountRef in step so a reconnect only replays the chunks the box has
+  // not seen yet.
+  const streamChunkToWs = useCallback((blob: Blob, index: number) => {
+    if (index < wsSentCountRef.current) return;
+    if (ScribeSocketService.isOpen() && ScribeSocketService.sendBinary(blob)) {
+      wsSentCountRef.current = index + 1;
+    }
+  }, []);
+
+  const handleAudioChunk = async (blob: Blob, mimeType: string) => {
+    recordingMimeTypeRef.current = mimeType;
+    const uploadBlob = await buildStandaloneChunk(blob, mimeType);
     const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
     const index = recordingChunkIndexRef.current;
     recordingChunkIndexRef.current += 1;
@@ -508,6 +564,10 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
           'x-goog-meta-test_type': testType || '',
         }
       : {};
+    // Same standalone chunk over the socket: the GPU box transcribes the exact
+    // audio the Cloud Run API also has. Streams first - the box hears each blob
+    // as soon as it is built instead of after the slower GCS round-trip.
+    streamChunkToWs(uploadBlob, index);
     const ok = await uploadToGcpPath(uploadBlob, `chunk_${index}.${ext}`, mimeType, undefined, meta);
     console.log('[scribe] chunk', index, 'upload ok=', ok);
     if (ok && !scribeSyncScheduledRef.current) {
@@ -525,6 +585,31 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
     }
   };
   handleAudioChunkRef.current = handleAudioChunk;
+
+  // When the GPU box socket connects, replay the chunks that were captured and
+  // uploaded to GCS before the socket opened (chunk_0 lands ~3s earlier), so the
+  // box receives the whole encounter rather than starting at an arbitrary tail.
+  // Reconnects produce a new session, so the flush re-runs whenever the socket
+  // opens again; wsSentCountRef keeps every chunk being sent exactly once.
+  useEffect(() => {
+    const offState = ScribeSocketService.on('state', ({ state }) => {
+      if (state !== 'open') return;
+      (async () => {
+        const mime = recordingMimeTypeRef.current || 'audio/webm';
+        let i = wsSentCountRef.current;
+        while (i < recordingChunkIndexRef.current && recordingChunksRef.current[i]) {
+          try {
+            const prepared = await buildStandaloneChunk(recordingChunksRef.current[i], mime);
+            streamChunkToWs(prepared, i);
+          } catch (err) {
+            console.warn('[scribe] WS catch-up failed for chunk', i, err);
+          }
+          i += 1;
+        }
+      })();
+    });
+    return () => offState();
+  }, [buildStandaloneChunk, streamChunkToWs]);
 
   const handleStopRecording = async () => {
     const recorder = mediaRecorderRef.current;
@@ -654,6 +739,8 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
       recordingChunkIndexRef.current = 0;
       containerHeaderRef.current = null;
       scribeSyncScheduledRef.current = false;
+      wsSentCountRef.current = 0;
+      recordingMimeTypeRef.current = mimeType;
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -791,6 +878,15 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
               {isRecording ? '🛑 Rec...' : '🎤 Record'}
             </button>
 
+            {transportBadge && (
+              <span
+                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold ${transportBadge.className}`}
+                title={transport === 'websocket' ? 'Live transcription over GPU WebSocket' : 'GPU WebSocket unreachable - using Cloud Run REST polling'}
+              >
+                {transportBadge.label}
+              </span>
+            )}
+
             <div className="w-px h-5 bg-gray-300 mx-0.5 shrink-0"></div>
 
             <select
@@ -906,6 +1002,15 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
           >
             {isRecording ? '🛑 Recording...' : '🎤 Record'}
           </button>
+
+          {transportBadge && (
+            <span
+              className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold ${transportBadge.className}`}
+              title={transport === 'websocket' ? 'Live transcription over GPU WebSocket' : 'GPU WebSocket unreachable - using Cloud Run REST polling'}
+            >
+              {transportBadge.label}
+            </span>
+          )}
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
 
