@@ -179,323 +179,19 @@ import IoTService from './services/IoTService';
 import {
   MeasurementService,
 } from '@ohif/core';
-import { annotation } from '@cornerstonejs/tools';
-import { triggerAnnotationRenderForViewportIds } from '@cornerstonejs/tools/utilities';
+
+import {
+  EXTRA_MEASUREMENT_KEYS,
+  hydrateMeasurement,
+  resolveImageReference,
+} from './utils/measurementHydrator';
 
 import { parse } from 'query-string';
 
 const extensionId = '@ohif/extension-actecal-erp';
 
-const CORNERSTONE_SOURCE_NAME = 'Cornerstone3DTools';
-const CORNERSTONE_SOURCE_VERSION = '0.1';
-
-// Color coding per owner: current user's measurements red, others blue.
-const MY_MEASUREMENT_COLOR = 'rgb(255, 45, 45)';
-const OTHER_MEASUREMENT_COLOR = 'rgb(60, 120, 255)';
-
-function getCurrentUserId() {
-  return new URLSearchParams(window.location.search).get('userId') || null;
-}
-
-function getOwnerColor(m, currentUserId) {
-  const owner = m && (m.created_by ?? m.createdBy);
-  if (owner && String(owner) === String(currentUserId)) {
-    return MY_MEASUREMENT_COLOR;
-  }
-  return OTHER_MEASUREMENT_COLOR;
-}
-
-// Parse the saved display text (e.g. "1895 mm") back into csTools cachedStats.
-function parseMeasurementText(primary) {
-  if (!Array.isArray(primary) || !primary.length) {
-    return null;
-  }
-
-  const text = String(primary[0]).trim();
-  const match = text.match(/(-?[\d.,]+)\s*([a-zA-Z%°²³]*)/);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    length: parseFloat(match[1].replace(/,/g, '')),
-    unit: match[2] || 'mm',
-  };
-}
-
-// csTools targetIds used as cachedStats keys are in "imageId:<id>"/"volumeId:<id>"/
-// "videoId:<id>" form, so the tools throw: 'getTargetIdImage: targetId must start
-// with "imageId:" or "volumeId:"' otherwise.
-// NOTE: this prefix is ONLY valid for cachedStats keys. Annotation
-// `metadata.referencedImageId` must stay the raw cornerstone imageId
-// ("wadors:..."), because that is what csTools itself stores
-// (AnnotationTool.hydrateBase -> viewport.getImageIds()[i]) and what
-// StackViewport.isReferenceViewable compares against getCurrentImageId().
-// OHIF's MetadataProvider.getUIDsFromImageID() also only parses ids starting
-// with "wadors:", so a prefixed id makes
-// cornerstone.metaData.get('instance', id) return undefined and the whole
-// hydration silently fails.
-function toTargetId(referencedImageId) {
-  if (!referencedImageId) {
-    return referencedImageId;
-  }
-  if (
-    referencedImageId.startsWith('imageId:') ||
-    referencedImageId.startsWith('volumeId:') ||
-    referencedImageId.startsWith('videoId:')
-  ) {
-    return referencedImageId;
-  }
-  return `imageId:${referencedImageId}`;
-}
-
-// Inverse of toTargetId: recovers the raw cornerstone imageId from a stored
-// targetId so legacy rows saved with a prefix still resolve.
-function stripTargetIdPrefix(referencedImageId) {
-  if (!referencedImageId) {
-    return referencedImageId;
-  }
-  const match = /^(?:imageId|volumeId|videoId):(.*)$/.exec(referencedImageId);
-  return match ? match[1] : referencedImageId;
-}
-
-// Resolve the imageId (and series/study) for a SOPInstanceUID by scanning the
-// loaded display sets of the study. The display set always owns the canonical
-// imageIds that the viewport and the metadata provider use, so this is
-// preferred over anything persisted on the measurement row.
-function resolveImageReference(displaySetService, studyUid, sopInstanceUid, seriesInstanceUid) {
-  if (!sopInstanceUid) {
-    return null;
-  }
-
-  let displaySets = [];
-  try {
-    displaySets = displaySetService.getDisplaySetsBy(ds => {
-      if (studyUid && ds.StudyInstanceUID !== studyUid) {
-        return false;
-      }
-      if (seriesInstanceUid && ds.SeriesInstanceUID !== seriesInstanceUid) {
-        return false;
-      }
-      return true;
-    });
-  } catch (e) {
-    displaySets = displaySetService.activeDisplaySets || [];
-  }
-
-  for (const ds of displaySets) {
-    const instances = ds.instances || ds.images || [];
-    const imageIds = ds.imageIds || (ds.images || []).map(i => i.imageId);
-    const idx = instances.findIndex(i => i.SOPInstanceUID === sopInstanceUid);
-
-    if (idx === -1) {
-      continue;
-    }
-
-    const referencedImageId =
-      (imageIds && imageIds[idx]) || instances[idx]?.imageId;
-
-    if (referencedImageId) {
-      return {
-        referencedImageId: stripTargetIdPrefix(referencedImageId),
-        SOPInstanceUID: sopInstanceUid,
-        SeriesInstanceUID: ds.SeriesInstanceUID || instances[idx]?.SeriesInstanceUID,
-        StudyInstanceUID: ds.StudyInstanceUID || studyUid,
-      };
-    }
-  }
-
-  return null;
-}
-
-// Convert a stored measurement (from the get-measurements API) back into a
-// csTools annotation and push it through the cornerstone measurement source so
-// that it renders on the viewport.
-function hydrateMeasurement(
-  measurementService,
-  displaySetService,
-  extensionManager,
-  cornerstoneViewportService,
-  studyUid,
-  m
-) {
-  const data = (m && m.data && typeof m.data === 'object' && !Array.isArray(m.data) && m.data.uid)
-    ? m.data
-    : m;
-
-  if (!data || typeof data !== 'object' || !data.uid) {
-    console.warn('Skipping invalid measurement:', m);
-    return;
-  }
-
-  // Never hydrate a row that belongs to a different study, even if the API or a
-  // realtime push hands it to us.
-  const rowStudyUid = data.StudyInstanceUID || data.metadata?.StudyInstanceUID || m.study_instance_uid;
-  if (studyUid && rowStudyUid && rowStudyUid !== studyUid) {
-    console.warn(
-      `Skipping measurement '${data.uid}' from study '${rowStudyUid}' while hydrating '${studyUid}'`
-    );
-    return;
-  }
-
-  const toolName = data.toolName;
-  if (!toolName) {
-    console.warn('Measurement has no toolName, skipping:', data);
-    return;
-  }
-
-  const source = measurementService.getSource(
-    CORNERSTONE_SOURCE_NAME,
-    CORNERSTONE_SOURCE_VERSION
-  );
-  if (!source) {
-    console.warn(`Cornerstone measurement source '${CORNERSTONE_SOURCE_NAME}' not found`);
-    return;
-  }
-
-  const sourceMappings =
-    measurementService.getSourceMappings(
-      CORNERSTONE_SOURCE_NAME,
-      CORNERSTONE_SOURCE_VERSION
-    ) || [];
-  const mapping = sourceMappings.find(mp => mp.annotationType === toolName);
-  if (!mapping) {
-    console.warn(`No measurement mapping for tool '${toolName}', skipping:`, data);
-    return;
-  }
-
-  let seriesInstanceUID = data.SeriesInstanceUID || data.metadata?.SeriesInstanceUID || null;
-  let studyInstanceUID = data.StudyInstanceUID || data.metadata?.StudyInstanceUID || studyUid;
-
-  // Prefer the display set's own imageId: it is the exact string the viewport
-  // and OHIF's metadata provider are keyed on. Only fall back to whatever was
-  // persisted on the row.
-  const resolved = resolveImageReference(
-    displaySetService,
-    studyInstanceUID,
-    data.SOPInstanceUID,
-    seriesInstanceUID
-  );
-
-  let referencedImageId = resolved?.referencedImageId;
-  if (resolved) {
-    seriesInstanceUID = seriesInstanceUID || resolved.SeriesInstanceUID;
-    studyInstanceUID = resolved.StudyInstanceUID || studyInstanceUID;
-  }
-
-  if (!referencedImageId) {
-    referencedImageId = stripTargetIdPrefix(
-      data.referencedImageId || data.metadata?.referencedImageId || null
-    );
-  }
-
-  if (!referencedImageId) {
-    console.warn(`Could not resolve imageId for measurement '${data.uid}', skipping:`, data);
-    return;
-  }
-
-  // cachedStats keys must be csTools targetIds ("imageId:<id>"), but
-  // metadata.referencedImageId must stay the raw imageId.
-  const targetId = toTargetId(referencedImageId);
-
-  const parsed = parseMeasurementText(data.displayText?.primary);
-  const cachedStats = parsed
-    ? { [targetId]: { length: parsed.length, unit: parsed.unit } }
-    : {};
-
-  const points = Array.isArray(data.points)
-    ? data.points.map(point => {
-        if (point && typeof point === 'object' && point.referencedImageId) {
-          const normalizedPointId = toTargetId(point.referencedImageId);
-          if (normalizedPointId !== point.referencedImageId) {
-            return { ...point, referencedImageId: normalizedPointId };
-          }
-        }
-        return point;
-      })
-    : data.points;
-
-  const annotationObject = {
-    annotationUID: data.uid,
-    predecessorImageId: data.predecessorImageId,
-    metadata: {
-      toolName,
-      FrameOfReferenceUID: data.FrameOfReferenceUID,
-      referencedImageId,
-      SOPInstanceUID: data.SOPInstanceUID,
-      SeriesInstanceUID: seriesInstanceUID,
-      StudyInstanceUID: studyInstanceUID,
-    },
-    data: {
-      label: data.label || '',
-      handles: {
-        points,
-        textBox: data.textBox,
-      },
-      cachedStats,
-    },
-  };
-
-  const activeDataSource = extensionManager.getActiveDataSource();
-  const dataSource = (activeDataSource && activeDataSource[0]) || null;
-
-  const measurementUid = measurementService.addRawMeasurement(
-    source,
-    toolName,
-    { annotation: annotationObject, uid: data.uid },
-    mapping.toMeasurementSchema,
-    dataSource
-  );
-
-  if (!measurementUid) {
-    // addRawMeasurement swallows mapping errors, so surface the most likely
-    // cause instead of silently rendering nothing.
-    console.warn(
-      `Failed to hydrate measurement '${data.uid}' (tool '${toolName}', imageId '${referencedImageId}')`
-    );
-    return;
-  }
-
-  // Surface the author so AnnotationFiltersPanel can group by owner instead of
-  // falling back to "Unknown".
-  try {
-    const owner = m && (m.created_by ?? m.createdBy);
-    if (owner != null) {
-      const stored = measurementService.getMeasurement(measurementUid);
-      if (stored) {
-        stored.createdBy = owner;
-      }
-    }
-  } catch (err) {
-    // Non-fatal: the annotation already exists and renders.
-  }
-
-  // Color-code by owner: current user red, other doctors blue. Render trigger
-  // lives in its own try/catch so a styling failure can't suppress the draw.
-  try {
-    annotation.config.style.setAnnotationStyles(measurementUid, {
-      color: getOwnerColor(m, getCurrentUserId()),
-    });
-  } catch (err) {
-    console.warn('Failed to apply measurement color:', err);
-  }
-
-  try {
-    if (cornerstoneViewportService) {
-      const renderingEngine = cornerstoneViewportService.getRenderingEngine();
-      const viewportIds = renderingEngine
-        ? renderingEngine.getViewports().map(viewport => viewport.id)
-        : [];
-      if (viewportIds.length) {
-        triggerAnnotationRenderForViewportIds(viewportIds);
-      }
-    }
-  } catch (err) {
-    console.warn('Failed to trigger annotation render:', err);
-  }
-}
-
+// Color coding per owner lives in utils/measurementColors.js: AI gets one
+// reserved colour, each doctor a stable slot in the palette.
 /* ---------------------------
    STUDY INITIALIZATION
 ---------------------------- */
@@ -803,11 +499,13 @@ async function preRegistration({  extensionManager,
 
   const { measurementService } = servicesManager.services;
 
-  // hydrateMeasurement stamps the row author onto the measurement so
-  // AnnotationFiltersPanel can group by owner; register the key so the schema
-  // validation in addRawMeasurement doesn't reject it.
+  // hydrateMeasurement stamps the row author plus the AI provenance/colour keys
+  // onto the measurement so AnnotationFiltersPanel can group by owner and
+  // MeasurementItems can colour each row. These MUST be registered here:
+  // _isValidMeasurement drops any measurement carrying an unregistered key, so
+  // a missing entry means AI measurements render nothing at all.
   if (typeof measurementService.addMeasurementSchemaKeys === 'function') {
-    measurementService.addMeasurementSchemaKeys(['createdBy']);
+    measurementService.addMeasurementSchemaKeys(EXTRA_MEASUREMENT_KEYS);
   }
 
   const measurementSource =
@@ -983,22 +681,42 @@ async function preRegistration({  extensionManager,
   ---------------------------- */
 
   const formatPayload = (m, eventType) => {
+    // AI provenance and the assigned colour are read back out of `metadata`
+    // first: csTools recalculates stats shortly after a measurement is added and
+    // re-runs the toMeasurement mapping, which rebuilds the top-level object and
+    // drops the stamps hydrateMeasurement applied.
+    const meta = m.metadata || {};
+    const isAi = m.isAi === true || meta.isAi === true;
+
     return {
       uid: m.uid,
       SOPInstanceUID: m.SOPInstanceUID,
       FrameOfReferenceUID: m.FrameOfReferenceUID,
       points: m.points,
-      toolName: m.toolName || m.metadata?.toolName,
+      toolName: m.toolName || meta.toolName,
       label: m.label,
       displayText: m.displayText,
       type: m.type,
       eventType: eventType,
-      SeriesInstanceUID: m.referenceSeriesUID || m.metadata?.SeriesInstanceUID,
-      StudyInstanceUID: m.referenceStudyUID || m.metadata?.StudyInstanceUID,
-      referencedImageId: m.referencedImageId || m.metadata?.referencedImageId,
+      SeriesInstanceUID: m.referenceSeriesUID || meta.SeriesInstanceUID,
+      StudyInstanceUID: m.referenceStudyUID || meta.StudyInstanceUID,
+      referencedImageId: m.referencedImageId || meta.referencedImageId,
       textBox: m.textBox,
       isLocked: m.isLocked,
       isVisible: m.isVisible,
+      // Author + colour so a reloaded measurement comes back in the same
+      // colour, and so the panel can group AI separately from each doctor.
+      created_by: m.createdBy ?? meta.createdBy ?? null,
+      colorHex: m.colorHex ?? null,
+      isAi: isAi || undefined,
+      aiLabel: isAi ? (m.aiLabel ?? meta.aiLabel) : undefined,
+      aiLocation: isAi ? (m.aiLocation ?? meta.aiLocation) : undefined,
+      aiSeverity: isAi ? (m.aiSeverity ?? meta.aiSeverity) : undefined,
+      aiConfidence: isAi ? (m.aiConfidence ?? meta.aiConfidence) : undefined,
+      aiModel: isAi ? (m.aiModel ?? meta.aiModel) : undefined,
+      aiLengthMm: isAi ? (m.aiLengthMm ?? meta.aiLengthMm) : undefined,
+      aiWidthMm: isAi ? (m.aiWidthMm ?? meta.aiWidthMm) : undefined,
+      aiSliceIndex: isAi ? (m.aiSliceIndex ?? meta.aiSliceIndex) : undefined,
     };
   };
 

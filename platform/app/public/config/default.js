@@ -45,6 +45,16 @@ window.config = {
     authToken: '',
     timeoutMs: 60000,
     modality: 'CT',
+    // ── DICOM analysis (POST /analyze-dicom) ──
+    // The panel has no model picker: the GPU box runs one vision model and
+    // swapping it is a server-side change, not a viewer one.
+    timeoutAnalysisMs: 120000,
+    dicomPrompt: 'Detect acute hemorrhage, mass effect, or nodule with exact measurements',
+    // Optional static bearer token. Left empty so the viewer presents its own
+    // ERP/Cognito session credential (localStorage['user']) instead.
+    apiToken: '',
+    // Set false to check credits but not deduct on analysis.
+    deductCredit: true,
   },
   // Clinical scribe (transcription/report) configuration
   scribe: {

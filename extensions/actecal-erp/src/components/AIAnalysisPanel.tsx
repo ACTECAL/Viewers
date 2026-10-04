@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import PropTypes from 'prop-types';
 import { useSystem } from '@ohif/core';
-import ApiService from '../services/ApiService';
-import { getAiConfig, runAiAnalysis } from '../services/AiService';
-import { captureActiveViewport, getActiveViewportInfo } from '../utils/captureActiveViewport';
-import drawMarkingsOnImage from '../utils/drawMarkingsOnImage';
+
+import { getActiveViewportInfo } from '../utils/captureActiveViewport';
+import { AI_COLOR } from '../utils/measurementColors';
+import { useDicomAiAnalysis } from '../hooks/useDicomAiAnalysis';
 
 const STATUS = {
   IDLE: 'idle',
@@ -14,33 +14,89 @@ const STATUS = {
   ERROR: 'error',
 };
 
-function AIAnalysisPanel() {
-  const { servicesManager } = useSystem();
-  const aiConfig = getAiConfig();
+const SEVERITY_TONE = {
+  high: 'bg-red-900/60 text-red-100 border-red-600',
+  medium: 'bg-orange-900/60 text-orange-100 border-orange-600',
+  low: 'bg-yellow-900/60 text-yellow-100 border-yellow-600',
+};
 
-  const [availableModels] = useState(
-    aiConfig.models && aiConfig.models.length
-      ? aiConfig.models
-      : [aiConfig.model || aiConfig.defaultModel || 'gemini-2.5-flash']
+function formatTimestamp(iso) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch (error) {
+    return iso || '';
+  }
+}
+
+function MeasurementRow({ measurement }) {
+  return (
+    <li className="bg-secondary-dark flex items-start gap-2 rounded border border-cyan-700/60 p-2">
+      <span
+        className="mt-1 inline-block h-3 w-3 shrink-0 rounded-full"
+        style={{ backgroundColor: AI_COLOR }}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-sm font-semibold text-cyan-100">{measurement.label}</span>
+          <span className="rounded bg-cyan-900/70 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cyan-100">
+            AI
+          </span>
+          {measurement.severity && (
+            <span
+              className={`rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                SEVERITY_TONE[String(measurement.severity).toLowerCase()] ||
+                'border-gray-500 bg-gray-700 text-gray-100'
+              }`}
+            >
+              {measurement.severity}
+            </span>
+          )}
+        </div>
+        {measurement.measurementText && (
+          <p className="text-sm text-white">{measurement.measurementText}</p>
+        )}
+        <p className="text-xs text-gray-300">
+          {measurement.location ? `${measurement.location} · ` : ''}
+          {measurement.toolType === 'Bidirectional' ? 'Bidirectional' : 'Length'}
+          {measurement.sliceIndex != null ? ` · slice ${measurement.sliceIndex}` : ''}
+          {measurement.confidence != null ? ` · confidence ${measurement.confidence}` : ''}
+        </p>
+      </div>
+    </li>
   );
-  const [model, setModel] = useState(aiConfig.defaultModel || aiConfig.model);
-  const [status, setStatus] = useState(STATUS.IDLE);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [result, setResult] = useState(null);
-  const [markedImage, setMarkedImage] = useState(null);
-  const [originalImage, setOriginalImage] = useState(null);
-  const [showMarked, setShowMarked] = useState(true);
-  const [credit, setCredit] = useState(null);
-  const [hasStudy, setHasStudy] = useState(false);
+}
 
-  const refreshActiveStudy = useCallback(() => {
-    const info = getActiveViewportInfo(servicesManager);
-    setHasStudy(!!(info.studyInstanceUid && info.viewport));
-  }, [servicesManager]);
+MeasurementRow.propTypes = {
+  measurement: PropTypes.shape({
+    label: PropTypes.string,
+    measurementText: PropTypes.string,
+    location: PropTypes.string,
+    severity: PropTypes.string,
+    confidence: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    sliceIndex: PropTypes.number,
+    toolType: PropTypes.string,
+  }).isRequired,
+};
 
-  // Track the currently open study/viewport so analysis always targets
-  // whatever the user has open at the moment they click.
-  useEffect(() => {
+function AIAnalysisPanel() {
+  const { servicesManager, extensionManager } = useSystem();
+  const { status, errorMessage, result, aiMeasurements, credit, originalImage, runAnalysis } =
+    useDicomAiAnalysis({
+      servicesManager,
+      extensionManager,
+    });
+
+  const [hasStudy, setHasStudy] = React.useState(false);
+
+  // Track the currently open study/viewport so analysis always targets whatever
+  // the user has open at the moment they click.
+  React.useEffect(() => {
+    const refreshActiveStudy = () => {
+      const info = getActiveViewportInfo(servicesManager);
+      setHasStudy(!!(info.studyInstanceUid && info.viewport));
+    };
+
     refreshActiveStudy();
     const viewportGridService = servicesManager.services.viewportGridService;
 
@@ -53,96 +109,16 @@ function AIAnalysisPanel() {
       };
     }
     return undefined;
-  }, [servicesManager, refreshActiveStudy]);
+  }, [servicesManager]);
 
-  // Show the available AI credit in the panel header.
-  useEffect(() => {
-    new ApiService()
-      .getAiCredits()
-      .then(credits => setCredit(credits.available))
-      .catch(() => setCredit(null));
-  }, []);
-
-  const handleRunAnalysis = async () => {
-    setStatus(STATUS.LOADING);
-    setErrorMessage('');
-    setResult(null);
-    setMarkedImage(null);
-    setOriginalImage(null);
-
-    try {
-      const info = getActiveViewportInfo(servicesManager);
-      if (!info.studyInstanceUid || !info.viewport) {
-        setStatus(STATUS.ERROR);
-        setErrorMessage('No active image is open to analyze. Open a study first.');
-        return;
-      }
-
-      const captured = captureActiveViewport(servicesManager);
-      setOriginalImage(captured.dataUrl);
-
-      const api = new ApiService();
-
-      // Credit gate — same logic as send-message credit checks on the backend:
-      // if the tenant has no AI balance left, analysis is not performed.
-      const credits = await api.getAiCredits();
-      setCredit(credits.available);
-      if (credits.available !== null && credits.available <= 0) {
-        setStatus(STATUS.INSUFFICIENT);
-        return;
-      }
-
-      const studyInfo = {
-        studyInstanceUid: info.studyInstanceUid,
-        viewportId: info.viewportId,
-        displaySetInstanceUID: info.displaySetInstanceUID || undefined,
-      };
-
-      const aiResult = await runAiAnalysis({
-        imageBase64: captured.imageBase64,
-        mimeType: captured.mimeType,
-        studyInfo,
-        model,
-      });
-      setResult(aiResult);
-
-      // Optional atomic credit consumption on the backend (mirrors send-msg
-      // balance deduction). If the endpoint is not deployed yet we continue.
-      if (aiConfig.deductCredit) {
-        const consumed = await api.consumeAiCredit();
-        if (consumed && consumed.data && consumed.data.aiBalance != null) {
-          setCredit(consumed.data.aiBalance);
-        }
-      }
-
-      const markings = Array.isArray(aiResult.markings) ? aiResult.markings : [];
-      if (markings.length) {
-        const marked = await drawMarkingsOnImage(captured.dataUrl, markings);
-        setMarkedImage(marked);
-      }
-
-      setStatus(STATUS.SUCCESS);
-    } catch (error) {
-      console.error('AI analysis failed:', error);
-      setStatus(STATUS.ERROR);
-      setErrorMessage(error.message || 'AI analysis failed. Please try again.');
-    }
-  };
-
-  const formatTimestamp = iso => {
-    try {
-      return new Date(iso).toLocaleString();
-    } catch (error) {
-      return iso || '';
-    }
-  };
+  const isLoading = status === STATUS.LOADING;
 
   return (
     <div className="bg-primary-dark relative flex h-full flex-col p-2 text-white">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1">
           <h3 className="whitespace-nowrap text-lg font-bold">AI Analysis</h3>
-          {credit !== null && (
+          {credit !== null && credit !== undefined && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-semibold ${
                 credit > 0 ? 'bg-green-800 text-green-100' : 'bg-red-900 text-red-100'
@@ -154,51 +130,34 @@ function AIAnalysisPanel() {
         </div>
         <button
           className="bg-primary-main hover:bg-primary-light rounded py-1 px-3 text-xs font-bold text-white disabled:opacity-50"
-          onClick={handleRunAnalysis}
-          disabled={status === STATUS.LOADING || !hasStudy}
+          onClick={runAnalysis}
+          disabled={isLoading || !hasStudy}
         >
-          {status === STATUS.LOADING ? 'Analyzing…' : 'Run AI Analysis'}
+          {isLoading ? 'Analyzing…' : 'Run AI Analysis'}
         </button>
       </div>
 
-      <div className="mb-2 flex items-center gap-2">
-        <label
-          className="text-xs text-gray-300"
-          htmlFor="ai-model"
-        >
-          AI Model:
-        </label>
-        <select
-          id="ai-model"
-          value={model}
-          onChange={event => setModel(event.target.value)}
-          disabled={status === STATUS.LOADING}
-          className="bg-secondary-dark border-secondary-light flex-1 rounded border p-1 text-xs text-white focus:outline-none"
-        >
-          {availableModels.map(m => (
-            <option
-              key={m}
-              value={m}
-              className="bg-secondary-dark"
-            >
-              {m}
-            </option>
-          ))}
-        </select>
-      </div>
+      <p className="mb-2 flex items-center gap-1.5 text-xs text-gray-300">
+        <span
+          className="inline-block h-2.5 w-2.5 rounded-full"
+          style={{ backgroundColor: AI_COLOR }}
+          aria-hidden="true"
+        />
+        AI findings are drawn on the image in cyan, separately from each doctor&apos;s measurements.
+      </p>
 
       {!hasStudy && status === STATUS.IDLE && (
         <div className="mb-14 p-2 text-sm text-gray-300">
-          Open a study and click <b>Run AI Analysis</b> to send the currently displayed image to the
-          AI model.
+          Open a study and click <b>Run AI Analysis</b> to send the currently displayed slice to the
+          GPU vision endpoint.
         </div>
       )}
 
-      {status === STATUS.LOADING && (
+      {isLoading && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-gray-200">
           <div className="border-primary-light h-8 w-8 animate-spin rounded-full border-4 border-t-transparent" />
           <p className="text-center text-sm">
-            Sending the open image to AI ({model}) and reviewing it…
+            Retrieving the DICOM instance and analyzing it on the GPU…
           </p>
         </div>
       )}
@@ -210,7 +169,9 @@ function AIAnalysisPanel() {
             Your account does not have enough AI balance to run this analysis. Please contact your
             administrator to add AI credits.
           </p>
-          {credit !== null && <p className="mt-2 text-xs">Available AI credits: {credit}</p>}
+          {credit !== null && credit !== undefined && (
+            <p className="mt-2 text-xs">Available AI credits: {credit}</p>
+          )}
         </div>
       )}
 
@@ -221,108 +182,85 @@ function AIAnalysisPanel() {
         </div>
       )}
 
-      {status === STATUS.SUCCESS && originalImage && (
-        <div className="mb-16 flex min-h-0 w-full flex-1 flex-col overflow-auto whitespace-pre-wrap">
-          <div className="bg-secondary-dark border-secondary-light mb-2 overflow-auto rounded border p-2 text-white">
-            {result.modelUsed && (
-              <div className="mb-2 flex items-center justify-between">
-                <span className="font-semibold text-gray-300">
-                  {result.provider === 'gemini' ? 'Gemini' : result.provider} · {result.modelUsed}
-                </span>
-                {result.confidence && (
-                  <span
-                    className={`rounded px-2 py-0.5 text-xs font-bold ${
-                      result.confidence === 'high'
-                        ? 'bg-green-800 text-green-100'
-                        : result.confidence === 'medium'
-                          ? 'bg-yellow-800 text-yellow-100'
-                          : 'bg-orange-800 text-orange-100'
-                    }`}
-                  >
-                    Confidence: {result.confidence}
+      {status === STATUS.SUCCESS && (
+        <div className="mb-16 flex min-h-0 w-full flex-1 flex-col overflow-auto">
+          {originalImage && (
+            <img
+              src={originalImage}
+              alt="Analyzed slice"
+              className="border-secondary-light mb-2 w-full rounded border"
+            />
+          )}
+
+          <div className="bg-secondary-dark border-secondary-light rounded border p-2 text-white">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold text-gray-300">{result?.model || 'GPU Vision'}</span>
+              <span className="flex items-center gap-1.5">
+                {result?.latencySec != null && (
+                  <span className="text-xs text-gray-400">
+                    {Number(result.latencySec).toFixed(1)}s
                   </span>
                 )}
-              </div>
-            )}
-
-            {markedImage && (
-              <div className="relative mb-2">
-                {showMarked && (
-                  <img
-                    src={markedImage}
-                    alt="AI marked image"
-                    className="border-primary-main w-full rounded border"
-                  />
-                )}
-                {!showMarked && (
-                  <img
-                    src={originalImage}
-                    alt="Original image"
-                    className="border-secondary-light w-full rounded border"
-                  />
-                )}
-                <div className="absolute top-2 right-2 flex gap-1">
-                  <button
-                    className={`rounded px-2 py-1 text-xs font-bold ${
-                      showMarked ? 'bg-primary-main text-white' : 'bg-black/60 text-gray-300'
-                    }`}
-                    onClick={() => setShowMarked(true)}
+                {result && !result.usedDicomFile && (
+                  <span
+                    className="rounded border border-amber-600 bg-amber-900/50 px-2 py-0.5 text-xs font-semibold text-amber-100"
+                    title="The PACS would not release the raw instance, so the rendered viewport image was analyzed instead."
                   >
-                    Marked
-                  </button>
-                  <button
-                    className={`rounded px-2 py-1 text-xs font-bold ${
-                      !showMarked ? 'bg-primary-main text-white' : 'bg-black/60 text-gray-300'
-                    }`}
-                    onClick={() => setShowMarked(false)}
-                  >
-                    Original
-                  </button>
-                </div>
-                {Array.isArray(result.markings) && result.markings.length > 0 && (
-                  <p className="mt-1 text-xs text-gray-300">
-                    {result.markings.length} region{result.markings.length > 1 ? 's' : ''}{' '}
-                    highlighted by AI.
-                  </p>
+                    Rendered image
+                  </span>
                 )}
-              </div>
-            )}
+              </span>
+            </div>
 
-            {!markedImage && (
-              <img
-                src={originalImage}
-                alt="Original image"
-                className="border-secondary-light mb-2 w-full rounded border"
-              />
-            )}
-
-            {result.findings && (
+            {result?.findings && (
               <div className="mb-2">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-gray-400">
-                  AI Findings
+                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-cyan-300">
+                  Findings
                 </p>
-                <p className="text-sm">{result.findings}</p>
+                <p className="text-sm text-gray-100">{result.findings}</p>
               </div>
             )}
 
-            {result.conclusion && (
-              <div className="mb-1">
-                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-gray-400">
-                  Impression / Conclusion
+            {result?.impression && result.impression !== result.findings && (
+              <div className="mb-2">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-cyan-300">
+                  Impression
                 </p>
-                <p className="text-sm italic">{result.conclusion}</p>
+                <p className="text-sm text-gray-100">{result.impression}</p>
               </div>
+            )}
+
+            {aiMeasurements.length > 0 && (
+              <div className="mb-2">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wide text-cyan-300">
+                  AI Measurements ({aiMeasurements.length})
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {aiMeasurements.map(measurement => (
+                    <MeasurementRow
+                      key={measurement.uid}
+                      measurement={measurement}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {aiMeasurements.length === 0 && (
+              <p className="text-sm text-gray-200">
+                No measurements to draw on this slice — the narrative above is the full result.
+              </p>
             )}
           </div>
 
-          <div className="mb-2 rounded border border-green-700 bg-green-900/40 p-2 text-green-100">
-            <p className="mb-1 text-xs font-bold">
-              ✓ AI-Verified Review — this image was checked and analyzed by AI
-            </p>
+          <div className="mt-2 rounded border border-green-700 bg-green-900/40 p-2 text-green-100">
+            <p className="mb-1 text-xs font-bold">✓ AI-Reviewed — this slice was analyzed by AI</p>
             <p className="text-xs">
-              Model <b>{result.modelUsed}</b> reviewed the currently open image on{' '}
-              <b>{formatTimestamp(result.analyzedAt)}</b>. AI markings shown above are preliminary
-              findings only and do not replace a radiologist&apos;s final report.
+              Model <b>{result?.model}</b> reviewed the displayed slice on{' '}
+              <b>{formatTimestamp(result?.analyzedAt)}</b>.{' '}
+              {aiMeasurements.length > 0
+                ? 'The cyan calipers above are preliminary findings only and do not replace a radiologist’s final report.'
+                : 'This is preliminary output only and does not replace a radiologist’s final report.'}
             </p>
           </div>
         </div>
@@ -331,18 +269,9 @@ function AIAnalysisPanel() {
   );
 }
 
-AIAnalysisPanel.propTypes = {
-  servicesManager: PropTypes.shape({
-    services: PropTypes.shape({
-      viewportGridService: PropTypes.shape({
-        getState: PropTypes.func.isRequired,
-        subscribe: PropTypes.func,
-        unsubscribe: PropTypes.func,
-        EVENTS: PropTypes.object,
-      }).isRequired,
-    }).isRequired,
-  }).isRequired,
-  extensionManager: PropTypes.object,
-};
+// servicesManager / extensionManager come from useSystem(), not from props, so
+// they are deliberately absent here: declaring them as required props would
+// warn on every render.
+AIAnalysisPanel.propTypes = {};
 
 export default AIAnalysisPanel;

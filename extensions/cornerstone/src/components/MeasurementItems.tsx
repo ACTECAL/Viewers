@@ -11,7 +11,11 @@ export function MeasurementItem(props) {
     <PanelAccordionTrigger
       count={index + 1}
       text={item.toolName || item.label || item.title}
-      colorHex="#f00"
+      // Colour comes from the measurement so the list swatch matches what is
+      // drawn on the viewport (the actecal-erp extension assigns one colour per
+      // author, and a reserved one for AI). Falls back to the old red for
+      // measurements created by extensions that do not set a colour.
+      colorHex={item.colorHex || '#f00'}
       isActive={item.isSelected}
       menu={MeasurementsMenu}
       group={{ items: [item], onClick: props.onClick }}
