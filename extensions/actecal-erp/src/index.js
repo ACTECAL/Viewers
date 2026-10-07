@@ -174,7 +174,7 @@ import React from 'react';
 
 
 
-import ApiService from './services/ApiService';
+import ApiService, { TAB_SESSION_ID } from './services/ApiService';
 import IoTService from './services/IoTService';
 import {
   MeasurementService,
@@ -185,6 +185,11 @@ import {
   hydrateMeasurement,
   resolveImageReference,
 } from './utils/measurementHydrator';
+
+import {
+  applyRemoteMeasurement,
+  isApplyingRemoteChange,
+} from './utils/remoteMeasurementApplier';
 
 import { parse } from 'query-string';
 
@@ -223,6 +228,20 @@ async function initializeStudy(extensionManager, servicesManager, measurementSer
         studyInstanceUids = shareData.studyInstanceUids;
         contexts = shareData.contexts;
         tokenData = shareData.tokenData;
+
+        // OHIF's route needs ?StudyInstanceUIDs= to enter the viewer, and later
+        // ApiService calls read ?userId=. resolveShare also persisted both to
+        // storage (session/local), but writing them back keeps SPA navigation
+        // and a page refresh on the same guest session.
+        const urlParams = new URLSearchParams(window.location.search);
+        if (studyInstanceUids?.length && !urlParams.get('StudyInstanceUIDs')) {
+          urlParams.set('StudyInstanceUIDs', studyInstanceUids.join(','));
+        }
+        if (shareData.userId && !urlParams.get('userId')) {
+          urlParams.set('userId', String(shareData.userId));
+        }
+        const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+        window.history.replaceState(null, '', newUrl);
       } catch (err) {
         uiNotificationService.show({
           title: 'Share Link Invalid',
@@ -608,7 +627,13 @@ async function preRegistration({  extensionManager,
       )].filter(studyUid => !loadedStudiesForMeasurements.has(studyUid));
 
       if (!studyUids.length) return;
-      studyUids.forEach(studyUid => loadedStudiesForMeasurements.add(studyUid));
+      studyUids.forEach(studyUid => {
+        loadedStudiesForMeasurements.add(studyUid);
+        // Join this study's realtime MQTT room (erp/study/<uid>/updates).
+        // IoTService ref-counts connect/disconnect so ActiveUsersPanel
+        // mounting cannot tear down the session-level subscription.
+        IoTService.connect(studyUid);
+      });
 
       const previousHydrating = isHydrating;
       isHydrating = true;
@@ -632,44 +657,75 @@ async function preRegistration({  extensionManager,
     Object.keys(hydratedAt).forEach(uid => delete hydratedAt[uid]);
   });
 
-  // Hydrate real-time measurements received from other connected experts
-  // (published by the backend to AWS IoT → IoTService).
-  const hydrateExternalMeasurement = (detail) => {
-    const measurement = detail?.measurement || detail?.data;
-    if (!measurement) {
-      return;
-    }
-    const referenced = measurement.StudyInstanceUID ||
-      measurement.metadata?.StudyInstanceUID;
-    const sop = measurement.SOPInstanceUID;
+  // Realtime measurement changes published by other doctors
+  // (erp-api → AWS IoT → IoTService). ADD, UPDATE and DELETE all arrive here.
+  window.addEventListener('actecal:externalMeasurement', (event) => {
+    const message = event.detail;
+    const measurement = message?.measurement;
 
-    let studyUid = referenced;
-    if (!studyUid) {
-      const resolved = resolveImageReference(displaySetService, null, sop);
-      studyUid = resolved?.StudyInstanceUID || null;
-    }
-
-    if (!studyUid) {
-      console.warn('Could not resolve study for external measurement:', measurement);
+    if (!message || (!measurement && !message.annotationUid)) {
       return;
     }
 
-    try {
-      hydrateMeasurement(
+    // Own echo: this tab already has the change locally, and re-applying it
+    // would detach a live annotation (mid-drag on a slow UPDATE publish).
+    if (message.sessionId && message.sessionId === TAB_SESSION_ID) {
+      return;
+    }
+
+    // Resolve which study this message belongs to, then require it to be one
+    // this viewer actually has open - the MQTT connection is session-level
+    // and can outlive SPA navigation away from a study.
+    let targetStudy =
+      message.studyInstanceUid ||
+      measurement?.StudyInstanceUID ||
+      measurement?.metadata?.StudyInstanceUID;
+
+    if (!targetStudy) {
+      const sop = measurement?.SOPInstanceUID || measurement?.metadata?.SOPInstanceUID;
+      if (sop) {
+        targetStudy = resolveImageReference(displaySetService, null, sop)?.StudyInstanceUID;
+      }
+    }
+
+    if (!targetStudy || !loadedStudiesForMeasurements.has(targetStudy)) {
+      return;
+    }
+
+    const result = applyRemoteMeasurement(
+      {
         measurementService,
         displaySetService,
         extensionManager,
         cornerstoneViewportService,
-        studyUid,
-        measurement
-      );
-    } catch (err) {
-      console.warn('Failed to hydrate external measurement:', err);
-    }
-  };
+        studyInstanceUid: targetStudy,
+      },
+      { ...message, measurement, studyInstanceUid: targetStudy }
+    );
 
-  window.addEventListener('actecal:externalMeasurement', (event) => {
-    hydrateExternalMeasurement(event.detail);
+    if (!result?.applied) {
+      if (result?.reason && result.reason !== 'unknown-annotation') {
+        console.log(
+          '[mqtt] remote change skipped:',
+          result.reason,
+          result.action,
+          result.annotationUid
+        );
+      }
+      return;
+    }
+
+    // csTools recalculates cachedStats shortly after a hydrate and re-emits
+    // MEASUREMENT_UPDATED outside the synchronous remote-apply window; the
+    // grace stamp keeps that from being written back and re-published.
+    if (result.annotationUid) {
+      measurementStudyMap[result.annotationUid] = targetStudy;
+      hydratedAt[result.annotationUid] = Date.now();
+    }
+
+    // No injectMeasurement dispatch here on purpose: the MEASUREMENT_ADDED
+    // subscriber below already fires (inside the remote-apply window) and
+    // dispatches it - a second dispatch would append a duplicate paragraph.
   });
 
 
@@ -742,9 +798,9 @@ async function preRegistration({  extensionManager,
     if (studyUid) {
       measurementStudyMap[measurement.uid] = studyUid;
 
-      // A replayed row is already persisted, so don't write it back — but still
-      // dispatch below so the report/Lexical side sees it.
-      if (!isReplaying(measurement.uid)) {
+      // A replayed row is already persisted, so don't write it back - and the
+      // same goes for a change applied from another doctor's MQTT message.
+      if (!isReplaying(measurement.uid) && !isApplyingRemoteChange()) {
         console.log("MEASUREMENT_ADDED:", event);
         debouncedSaveMeasurement(studyUid, measurement, 'ADD');
       }
@@ -761,7 +817,7 @@ async function preRegistration({  extensionManager,
     const measurement = event?.measurement;
     const studyUid = measurement?.referenceStudyUID || measurement?.studyInstanceUid;
     if (studyUid) {
-      if (isReplaying(measurement.uid)) {
+      if (isReplaying(measurement.uid) || isApplyingRemoteChange()) {
         return;
       }
       debouncedSaveMeasurement(studyUid, measurement, 'UPDATE');
@@ -774,9 +830,13 @@ async function preRegistration({  extensionManager,
       const studyUid = measurementStudyMap[annotationUID];
       if (studyUid) {
         // Event-log tombstone: the row stays in the DB but GET filters
-        // annotation_uid's latest row out when it is a DELETE.
-        console.log("MEASUREMENT_REMOVED:", event);
-        apiService.saveMeasurement(studyUid, { uid: annotationUID, eventType: 'DELETE' }).catch(e => console.error('Delete failed', e));
+        // annotation_uid's latest row out when it is a DELETE. A remote-applied
+        // delete is already persisted by the doctor who made it - writing it
+        // again would echo back over MQTT.
+        if (!isApplyingRemoteChange()) {
+          console.log("MEASUREMENT_REMOVED:", event);
+          apiService.saveMeasurement(studyUid, { uid: annotationUID, eventType: 'DELETE' }).catch(e => console.error('Delete failed', e));
+        }
         delete measurementStudyMap[annotationUID];
       }
     }
