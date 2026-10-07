@@ -33,7 +33,7 @@ import {
   hydrateMeasurement,
   validatePlacement,
 } from '../utils/measurementHydrator';
-import { AI_AUTHOR_KEY } from '../utils/measurementColors';
+import { AI_AUTHOR_KEY, AI_COLOR } from '../utils/measurementColors';
 
 const STATUS = {
   IDLE: 'idle',
@@ -127,6 +127,7 @@ function buildAiRow(measurement, context, index) {
     referencedImageId: instance.imageId || null,
     // Provenance: read back by the sidebars, the legend and the report.
     created_by: AI_AUTHOR_KEY,
+    colorHex: AI_COLOR,
     isAi: true,
     aiLabel: measurement.label,
     aiLocation: measurement.location,
@@ -411,6 +412,7 @@ export function useDicomAiAnalysis({ servicesManager, extensionManager }) {
                 secondary: [],
               },
               created_by: AI_AUTHOR_KEY,
+              colorHex: AI_COLOR,
               isAi: true,
               aiLabel: row.aiLabel,
               aiLocation: row.aiLocation,

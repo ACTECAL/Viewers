@@ -731,7 +731,7 @@ class ApiService {
     }
   }
 
-  async consumeAiCredit() {
+  async consumeAiCredit(amount = 1) {
     const headers = {
       'Content-Type': 'application/json',
       ...this._permissionHeaders(),
@@ -741,7 +741,7 @@ class ApiService {
       return await authFetch(`${this.baseUrl}/ai-credit/consume`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({}),
+        body: JSON.stringify({ amount: Math.max(1, Number(amount) || 1) }),
       });
     } catch (error) {
       console.warn('[AI CREDIT] consumeAiCredit failed (endpoint may not be deployed):', error);
