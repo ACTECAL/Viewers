@@ -1083,6 +1083,11 @@ function ToolbarPlugin({
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
+      recordingChunksRef.current = [];
+      containerHeaderRef.current = null;
+      wsSentCountRef.current = 0;
+      lastUploadedChunkIndexRef.current = 0;
+      isFallbackActiveRef.current = false;
     };
   }, []);
 
