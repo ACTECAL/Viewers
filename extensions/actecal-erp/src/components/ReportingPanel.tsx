@@ -467,6 +467,8 @@ function ToolbarPlugin({
     finalizeConsultation,
     reportStatus,
     transport,
+    serverHealth,
+    isFallback: isScribeFallback,
     liveTranscript: scribeTranscript,
     runningSummary: scribeSummary,
   } = useClinicalScribe({
@@ -509,18 +511,32 @@ function ToolbarPlugin({
     onRecordingChange?.(isRecording);
   }, [isRecording, onRecordingChange]);
 
-  // Transport badge. The switch to REST polling is meant to be invisible to the
-  // doctor, but a silent handover is indistinguishable from "AI stopped
-  // working" - one glance at this is the difference between a support call and
-  // a five-second fix.
-  const transportBadge =
-    transport === 'websocket'
-      ? { label: 'Live (WS)', className: 'text-green-700 border-green-300 bg-green-50' }
-      : transport === 'polling'
-        ? { label: 'Fallback polling', className: 'text-amber-700 border-amber-300 bg-amber-50' }
-        : reportStatus === 'connecting'
-          ? { label: 'Connecting...', className: 'text-gray-500 border-gray-300 bg-gray-50' }
-          : null;
+  // Server Fallback Signal (Green = Primary GPU, Orange = Fallback to Secondary Server)
+  const isFallbackServer = isScribeFallback || isFallbackActiveRef.current || transport === 'polling' || serverHealth === 'fallback';
+
+  const serverSignalBadge = {
+    isFallback: isFallbackServer,
+    dotClass: isFallbackServer
+      ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.9)] animate-pulse'
+      : serverHealth === 'checking'
+        ? 'bg-gray-400'
+        : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]',
+    pillClass: isFallbackServer
+      ? 'text-amber-800 border-amber-300 bg-amber-50'
+      : serverHealth === 'checking'
+        ? 'text-gray-600 border-gray-300 bg-gray-50'
+        : 'text-emerald-800 border-emerald-300 bg-emerald-50',
+    label: isFallbackServer
+      ? 'Fallback: Secondary Server'
+      : serverHealth === 'checking'
+        ? 'Checking Server...'
+        : transport === 'websocket'
+          ? 'Live (WS)'
+          : 'Primary Server',
+    tooltip: isFallbackServer
+      ? 'Fallback to secondary servers. Response might be delayed by few seconds.'
+      : 'Primary GPU Server connected (Real-time STT)',
+  };
 
   // The MediaRecorder callback is created once (inside startRecording) and, on
   // its own, would keep capturing the scribe functions from the render where
@@ -1085,8 +1101,9 @@ function ToolbarPlugin({
   const buttonClass = "px-1.5 py-0.5 min-w-[28px] bg-white rounded flex items-center justify-center hover:bg-gray-100 hover:text-black transition-colors border border-gray-300 shadow-sm text-gray-700";
 
   return (
-    <div className="flex flex-wrap gap-1 p-1 bg-white border-b border-gray-300 items-center text-sm sticky top-0 z-10 text-gray-800 shadow-sm overflow-visible">
-      {!isExpanded ? (
+    <div className="sticky top-0 z-10 w-full flex flex-col">
+      <div className="flex flex-wrap gap-1 p-1 bg-white border-b border-gray-300 items-center text-sm text-gray-800 shadow-sm overflow-visible">
+        {!isExpanded ? (
         <div className="flex flex-col gap-1 w-full overflow-hidden">
           <div className="flex flex-nowrap gap-1 items-center w-full">
             <button
@@ -1097,14 +1114,14 @@ function ToolbarPlugin({
               {isRecording ? '🛑 Rec...' : '🎤 Record'}
             </button>
 
-            {transportBadge && (
-              <span
-                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold ${transportBadge.className}`}
-                title={transport === 'websocket' ? 'Live transcription over GPU WebSocket' : 'GPU WebSocket unreachable - using Cloud Run REST polling'}
-              >
-                {transportBadge.label}
-              </span>
-            )}
+            {/* Server Fallback Signal (Green to Orange) */}
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold flex items-center gap-1.5 cursor-default transition-all ${serverSignalBadge.pillClass}`}
+              title={serverSignalBadge.tooltip}
+            >
+              <span className={`w-2 h-2 rounded-full ${serverSignalBadge.dotClass}`} />
+              {serverSignalBadge.label}
+            </span>
 
             <div className="w-px h-5 bg-gray-300 mx-0.5 shrink-0"></div>
 
@@ -1222,14 +1239,14 @@ function ToolbarPlugin({
             {isRecording ? '🛑 Recording...' : '🎤 Record'}
           </button>
 
-          {transportBadge && (
-            <span
-              className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold ${transportBadge.className}`}
-              title={transport === 'websocket' ? 'Live transcription over GPU WebSocket' : 'GPU WebSocket unreachable - using Cloud Run REST polling'}
-            >
-              {transportBadge.label}
-            </span>
-          )}
+          {/* Server Fallback Signal (Green to Orange) */}
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold flex items-center gap-1.5 cursor-default transition-all ${serverSignalBadge.pillClass}`}
+            title={serverSignalBadge.tooltip}
+          >
+            <span className={`w-2 h-2 rounded-full ${serverSignalBadge.dotClass}`} />
+            {serverSignalBadge.label}
+          </span>
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
 
@@ -1273,6 +1290,20 @@ function ToolbarPlugin({
         </>
       )}
     </div>
+
+    {/* Fallback Notice Banner (Green to Orange transition) */}
+    {isFallbackServer && (
+      <div className="w-full bg-amber-50/95 border-b border-amber-200 text-amber-900 text-[11px] px-2.5 py-1 flex items-center justify-between gap-1 font-medium transition-all shadow-sm">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+          <span>Fallback to secondary servers. Response might be delayed by few seconds.</span>
+        </div>
+        <span className="text-[9px] text-amber-800 font-bold bg-amber-200/80 px-1.5 py-0.5 rounded border border-amber-300 uppercase tracking-wider shrink-0">
+          Cloud Fallback Active
+        </span>
+      </div>
+    )}
+  </div>
   );
 }
 
