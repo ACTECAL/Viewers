@@ -306,7 +306,7 @@ export const useClinicalScribe = ({
     updateLexicalEditor,
   ]);
 
-  const startScribeSync = useCallback(() => {
+  const startScribeSync = useCallback(async () => {
     const activeTenant = tenantNameRef.current;
     const activeVisit = visitIdRef.current;
     if (!activeTenant || !activeVisit) {
@@ -327,7 +327,9 @@ export const useClinicalScribe = ({
     setIsRecording(true);
     setStatus('connecting');
 
-    const started = ScribeSocketService.connect({
+    // Health-gated connection: if GPU /health is healthy, connect WebSocket.
+    // If /health is down, times out, or unhealthy, immediately fallback to Cloud Run REST polling (old logic).
+    const started = await ScribeSocketService.connectWithHealthCheck({
       tenant: activeTenant,
       visitId: activeVisit,
       department,
@@ -335,8 +337,7 @@ export const useClinicalScribe = ({
     });
 
     if (!started) {
-      // Either gpu.enabled is off or gpu.wsUrl is missing. Go straight to
-      // polling rather than sitting in "connecting" forever.
+      console.log('[scribe] GPU /health down or WebSocket unavailable -> using Cloud Run fallback polling');
       startFallbackPolling();
     }
     return true;

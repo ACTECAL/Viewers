@@ -36,9 +36,9 @@ window.config = {
   gpu: {
     enabled: true,
     // Base URL for GPU HTTP endpoints (analyze-dicom, update-dicom-measurement)
-    baseUrl: 'http://34.9.15.48:8000',
+    baseUrl: 'https://34.9.15.48.sslip.io',
     // Primary WebSocket URL for real-time transcription/report updates
-    wsUrl: 'ws://34.9.15.48:8000/ws/transcribe',
+    wsUrl: 'wss://34.9.15.48.sslip.io/ws/transcribe',
     // NOT SENT: the GPU box accepts tokenless WS handshakes (verified). If it
     // ever enforces JWT auth, provide the token here and re-add it to the
     // socket URL in ScribeSocketService.buildUrl().

@@ -786,6 +786,10 @@ class ApiService {
     return authFetch(`${this.baseUrl}/get-draft-report?studyInstanceUid=${studyInstanceUid}`);
   }
 
+  async fetchDraftReport(studyInstanceUid) {
+    return this.getDraftReport(studyInstanceUid);
+  }
+
   async getAutoFillTemplate(studyInstanceUid) {
     return authFetch(
       `${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`
@@ -798,7 +802,7 @@ class ApiService {
     );
   }
 
-  async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType }) {
+  async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType, transcript, aiNotes }) {
     return authFetch(`${this.baseUrl}/submit-report-erp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -807,6 +811,8 @@ class ApiService {
         template,
         pdfBase64,
         reportType,
+        transcript,
+        aiNotes,
       }),
     });
   }
@@ -857,7 +863,7 @@ class ApiService {
     }
   }
 
-  async consumeAiCredit() {
+  async consumeAiCredit(amount = 1) {
     const headers = {
       'Content-Type': 'application/json',
       ...this._permissionHeaders(),
@@ -867,7 +873,7 @@ class ApiService {
       return await authFetch(`${this.baseUrl}/ai-credit/consume`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({}),
+        body: JSON.stringify({ amount: Math.max(1, Number(amount) || 1) }),
       });
     } catch (error) {
       console.warn('[AI CREDIT] consumeAiCredit failed (endpoint may not be deployed):', error);
