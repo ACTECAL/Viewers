@@ -583,6 +583,11 @@ function ToolbarPlugin({
   // chunks for the WS catch-up flush.
   const recordingMimeTypeRef = useRef<string>('audio/webm');
 
+  // Real-time 250ms audio streaming (Web Audio API 16kHz PCM)
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const isRecordingRef = useRef<boolean>(false);
+
   const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string, basePath?: string, metadata: Record<string, string> = {}) => {
     const cfg = recordingConfigRef.current;
     if (!blob || !cfg?.token || !cfg?.bucket || !cfg?.prefix) {
@@ -638,16 +643,6 @@ function ToolbarPlugin({
     return prepared;
   }, []);
 
-  // Pushes one standalone chunk to the GPU box as a binary WS frame, keeping
-  // wsSentCountRef in step so a reconnect only replays the chunks the box has
-  // not seen yet.
-  const streamChunkToWs = useCallback((blob: Blob, index: number) => {
-    if (index < wsSentCountRef.current) return;
-    if (ScribeSocketService.isOpen() && ScribeSocketService.sendBinary(blob)) {
-      wsSentCountRef.current = index + 1;
-    }
-  }, []);
-
   const handleAudioChunk = async (blob: Blob, mimeType: string) => {
     recordingMimeTypeRef.current = mimeType;
     const uploadBlob = await buildStandaloneChunk(blob, mimeType);
@@ -660,52 +655,11 @@ function ToolbarPlugin({
           'x-goog-meta-test_type': testType || '',
         }
       : {};
-    // Same standalone chunk over the socket: the GPU box transcribes the exact
-    // audio the Cloud Run API also has. Streams first - the box hears each blob
-    // as soon as it is built instead of after the slower GCS round-trip.
-    streamChunkToWs(uploadBlob, index);
+    // Upload 30s chunk to GCS for Cloud Run fallback & complete archival
     const ok = await uploadToGcpPath(uploadBlob, `chunk_${index}.${ext}`, mimeType, undefined, meta);
-    console.log('[scribe] chunk', index, 'upload ok=', ok);
-    if (ok && !scribeSyncScheduledRef.current) {
-      scribeSyncScheduledRef.current = true;
-      if (scribeSyncTimerRef.current) clearTimeout(scribeSyncTimerRef.current);
-      console.log('[scribe] scheduling startScribeSync in 3s');
-      scribeSyncTimerRef.current = setTimeout(() => {
-        const started = startScribeSyncRef.current();
-        if (!started) {
-          // visitId/tenantName may have arrived late — retry once after 5s.
-          console.log('[scribe] startScribeSync returned false, retrying in 5s');
-          scribeSyncTimerRef.current = setTimeout(() => startScribeSyncRef.current(), 5000);
-        }
-      }, 3000);
-    }
+    console.log('[scribe] 30s chunk', index, 'uploaded to GCP, ok=', ok);
   };
   handleAudioChunkRef.current = handleAudioChunk;
-
-  // When the GPU box socket connects, replay the chunks that were captured and
-  // uploaded to GCS before the socket opened (chunk_0 lands ~3s earlier), so the
-  // box receives the whole encounter rather than starting at an arbitrary tail.
-  // Reconnects produce a new session, so the flush re-runs whenever the socket
-  // opens again; wsSentCountRef keeps every chunk being sent exactly once.
-  useEffect(() => {
-    const offState = ScribeSocketService.on('state', ({ state }) => {
-      if (state !== 'open') return;
-      (async () => {
-        const mime = recordingMimeTypeRef.current || 'audio/webm';
-        let i = wsSentCountRef.current;
-        while (i < recordingChunkIndexRef.current && recordingChunksRef.current[i]) {
-          try {
-            const prepared = await buildStandaloneChunk(recordingChunksRef.current[i], mime);
-            streamChunkToWs(prepared, i);
-          } catch (err) {
-            console.warn('[scribe] WS catch-up failed for chunk', i, err);
-          }
-          i += 1;
-        }
-      })();
-    });
-    return () => offState();
-  }, [buildStandaloneChunk, streamChunkToWs]);
 
   const handleStopRecording = async () => {
     const recorder = mediaRecorderRef.current;
@@ -742,6 +696,15 @@ function ToolbarPlugin({
       }
     } catch (err) {
       console.error('[scribe] Failed to upload complete recording:', err);
+    }
+    isRecordingRef.current = false;
+    if (scriptProcessorRef.current) {
+      try { scriptProcessorRef.current.disconnect(); } catch (_) {}
+      scriptProcessorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close(); } catch (_) {}
+      audioContextRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -825,6 +788,47 @@ function ToolbarPlugin({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
+      // 1. Immediately trigger Scribe WebSocket sync with GPU /health check
+      startScribeSyncRef.current();
+
+      // 2. Set up Web Audio API 16kHz PCM streaming in milliseconds (256ms)
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const audioCtx = new AudioCtx({ sampleRate: 16000 });
+        audioContextRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(stream);
+        // 4096 samples at 16kHz = 256ms chunk cadence
+        const bufferSize = 4096;
+        const scriptNode = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+        scriptProcessorRef.current = scriptNode;
+
+        scriptNode.onaudioprocess = (e) => {
+          if (!isRecordingRef.current) return;
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(inputData.length);
+          let peak = 0;
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            const abs = Math.abs(pcm16[i]);
+            if (abs > peak) peak = abs;
+          }
+          // Client-side VAD & silence/mute gating:
+          // If doctor mutes mic or stays silent (peak < 300), do NOT send audio frames
+          if (peak >= 300) {
+            if (ScribeSocketService.isOpen()) {
+              ScribeSocketService.sendBinary(pcm16.buffer);
+            }
+          }
+        };
+
+        source.connect(scriptNode);
+        scriptNode.connect(audioCtx.destination);
+        console.log('[scribe] Web Audio PCM real-time ms streamer active (256ms cadence)');
+      } catch (pcmErr) {
+        console.warn('[scribe] Could not start Web Audio PCM streamer:', pcmErr);
+      }
+
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
         ? 'audio/webm'
         : 'audio/mp4';
@@ -834,7 +838,7 @@ function ToolbarPlugin({
       recordingChunksRef.current = [];
       recordingChunkIndexRef.current = 0;
       containerHeaderRef.current = null;
-      scribeSyncScheduledRef.current = false;
+      scribeSyncScheduledRef.current = true;
       wsSentCountRef.current = 0;
       recordingMimeTypeRef.current = mimeType;
 
@@ -847,11 +851,13 @@ function ToolbarPlugin({
 
       recorder.onerror = (event: any) => {
         console.error('MediaRecorder error:', event.error);
+        isRecordingRef.current = false;
         setIsRecording(false);
       };
 
-      recorder.start(30000); // chunk every 30 seconds
+      recorder.start(30000); // chunk every 30 seconds for Cloud Run GCS archival / fallback
       console.log('[scribe] MediaRecorder started, mimeType=', mimeType, 'chunk every 30s');
+      isRecordingRef.current = true;
       setIsRecording(true);
       if (!opts?.silent) {
         console.log('Audio recording started (auto or manual)');
@@ -861,6 +867,7 @@ function ToolbarPlugin({
       if (!opts?.silent) {
         console.error('Failed to start audio recording:', err);
       }
+      isRecordingRef.current = false;
       setIsRecording(false);
     }
   };

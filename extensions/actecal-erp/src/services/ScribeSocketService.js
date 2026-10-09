@@ -276,6 +276,42 @@ class ScribeSocketService {
     }
   }
 
+  async checkHealth(timeoutMs = 2500) {
+    const config = getGpuConfig();
+    if (!config.enabled || !config.baseUrl) {
+      return false;
+    }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${config.baseUrl}/health`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        console.warn(`[scribe-socket] GPU /health returned status ${res.status}`);
+        return false;
+      }
+      const data = await res.json();
+      const isHealthy = !!(data && (data.status === 'healthy' || data.gpu));
+      console.log(`[scribe-socket] GPU /health probe: ${isHealthy ? 'HEALTHY' : 'UNHEALTHY'}`);
+      return isHealthy;
+    } catch (err) {
+      console.warn(`[scribe-socket] GPU /health probe failed (${err.message})`);
+      return false;
+    }
+  }
+
+  async connectWithHealthCheck({ tenant, visitId, department, testType }, timeoutMs = 2500) {
+    const isHealthy = await this.checkHealth(timeoutMs);
+    if (!isHealthy) {
+      console.warn('[scribe-socket] GPU /health offline or unreachable -> skipping WS to use Cloud Run');
+      return false;
+    }
+    return this.connect({ tenant, visitId, department, testType });
+  }
+
   connect({ tenant, visitId, department, testType }) {
     if (!tenant || !visitId) {
       console.warn('[scribe-socket] connect blocked: tenant/visitId not ready', {
@@ -523,7 +559,10 @@ class ScribeSocketService {
     try {
       this.ws.send(data);
       const bytes = data && typeof data.byteLength === 'number' ? data.byteLength : data?.size || 0;
-      console.log(`[scribe-socket] -> frame (${bytes} bytes binary)`);
+      if (!this._lastBinaryLog || Date.now() - this._lastBinaryLog > 4000) {
+        console.log(`[scribe-socket] -> streaming live audio frame (${bytes} bytes)`);
+        this._lastBinaryLog = Date.now();
+      }
       return true;
     } catch (err) {
       console.error('[scribe-socket] sendBinary failed', err);
