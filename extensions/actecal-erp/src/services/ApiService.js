@@ -19,26 +19,67 @@ const getApiBaseUrl = () => window.config?.apiBaseUrl;
 // ────────────────────────────────────────────────
 const TENANT_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/i;
 
+// const getTenant = () => {
+//   let stored = null;
+
+//   try {
+//     stored = localStorage.getItem('tenantName');
+//   } catch (err) {
+//     // storage unavailable (private mode, quota, ...) - fall through to config
+//   }
+
+//   if (stored && TENANT_PATTERN.test(stored)) {
+//     return stored;
+//   }
+
+//   if (stored) {
+//     console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+//   }
+
+//   return window.config?.tenant;
+// };
+
+
 const getTenant = () => {
-  let stored = null;
-
+  // 1. Get tenant from current URL hostname
   try {
-    stored = localStorage.getItem('tenantName');
+    const hostname = window.location.hostname;
+    const subdomain = hostname.split('.')[0];
+
+    if (
+      hostname.endsWith('.spectra.actecal.com') &&
+      TENANT_PATTERN.test(subdomain)
+    ) {
+      return subdomain;
+    }
   } catch (err) {
-    // storage unavailable (private mode, quota, ...) - fall through to config
+    // Fall through to localStorage and config
   }
 
-  if (stored && TENANT_PATTERN.test(stored)) {
-    return stored;
+  // 2. Fallback to localStorage
+  try {
+    const stored = localStorage.getItem('tenantName');
+
+    if (stored && TENANT_PATTERN.test(stored)) {
+      return stored;
+    }
+
+    if (stored) {
+      console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+    }
+  } catch (err) {
+    // Storage unavailable - fall through to config
   }
 
-  if (stored) {
-    console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+  // 3. Final fallback to config
+  const configTenant = window.config?.tenant;
+
+  if (configTenant && TENANT_PATTERN.test(configTenant)) {
+    return configTenant;
   }
 
-  return window.config?.tenant;
+  return undefined;
 };
-
 // userId arrives via ?userId= and is written to storage by App.tsx. Falling back
 // to it here matters because several call sites construct ApiService with no
 // argument, and endpoints such as /dicom/gcp-token answer 401 without x-user-id
@@ -467,6 +508,27 @@ const authFetch = async (url, options = {}) => {
 
   const requestOptions = { ...options };
 
+  // Share/guest doctor: token cookie nahi bhi rahe to bhi 401 na aaye - har
+  // request pe Bearer guest token bhejo (verifyViewerAccess header se bhi
+  // verify karta hai). Cookie + header dono hone se koi bhi API 30 min tak
+  // authenticate rehti hai.
+  const guestToken = sessionStorage.getItem('actecal_guestToken');
+  const guestPermToken = sessionStorage.getItem('actecal_permToken');
+  if (guestToken) {
+    requestOptions.headers = {
+      ...(requestOptions.headers || {}),
+      ...(!requestOptions.headers?.Authorization ? { Authorization: `Bearer ${guestToken}` } : {}),
+      ...(guestPermToken
+        ? { 'x-perm': guestPermToken }
+        : {}),
+    };
+  } else if (guestPermToken) {
+    requestOptions.headers = {
+      ...(requestOptions.headers || {}),
+      ...{ 'x-perm': guestPermToken },
+    };
+  }
+
   let response = await fetch(url, {
     ...requestOptions,
     credentials: 'include',
@@ -488,6 +550,23 @@ const authFetch = async (url, options = {}) => {
       clearReturnTo();
       redirectToLogin();
       throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    // Guest share session (30-min cookies): re-open it via the public
+    // /resolve-share endpoint instead of the Cognito refresh/redirect path -
+    // a guest has no refresh_token, so refreshTokens() would always fail and
+    // dump them on the login page. The sharecode stays in the URL for the
+    // life of the link.
+    const shareCode = new URLSearchParams(window.location.search).get('sharecode');
+    if (shareCode && sessionStorage.getItem('actecal_guestToken')) {
+      console.log('[AUTH FETCH] Guest session expired, re-opening share session');
+      try {
+        await new ApiService(undefined).resolveShare(shareCode);
+        return authFetch(url, { ...requestOptions, __retried: true });
+      } catch (shareErr) {
+        console.error('[AUTH FETCH] Share session re-open failed:', shareErr);
+        throw shareErr;
+      }
     }
 
     if (isRefreshing) {
@@ -551,6 +630,12 @@ const authFetch = async (url, options = {}) => {
   return response.json();
 };
 
+// Per-tab session id, sent on measurement saves so the viewer can ignore its
+// own MQTT echo: erp-api echoes it back in the publish payload, and the
+// external-measurement listener drops messages that carry this id. Without it
+// an UPDATE echo would detach the live annotation mid-drag.
+export const TAB_SESSION_ID = `tab-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
+
 // ────────────────────────────────────────────────
 // ApiService
 // ────────────────────────────────────────────────
@@ -598,8 +683,17 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
         'x-user-id': this.userId,
+        'x-session-id': TAB_SESSION_ID,
       },
       body: JSON.stringify(measurementData),
+    });
+  }
+
+  // SigV4 presigned AWS IoT Core WebSocket URL (MQTT over wss). The browser
+  // cannot hold AWS credentials, so erp-api signs the handshake.
+  async getIotUrl() {
+    return authFetch(`${this.baseUrl}/iot-url`, {
+      headers: { 'x-user-id': this.userId },
     });
   }
 
@@ -628,8 +722,40 @@ class ApiService {
     });
   }
 
+  // Guest share entry: no Cognito session exists yet, so authFetch would 401 ->
+  // refresh -> Cognito redirect ("login maangta hai"). A bare credentialed
+  // fetch hits the public /resolve-share endpoint, which sets the 30-minute
+  // guest cookies (access_token/guest_user/tenant). The returned guestToken +
+  // userId are stored so every later call (x-user-id, Bearer fallback) works.
   async resolveShare(shareCode) {
-    return authFetch(`${this.baseUrl}/resolve-share?code=${encodeURIComponent(shareCode)}`);
+    const url = `${getApiBaseUrl()}/erp/${getTenant()}/resolve-share?code=${encodeURIComponent(shareCode)}`;
+    const response = await fetch(url, { credentials: 'include' });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    try {
+      if (data?.guestToken) {
+        sessionStorage.setItem('actecal_guestToken', data.guestToken);
+      }
+      if (data?.permToken) {
+        sessionStorage.setItem('actecal_permToken', data.permToken);
+      }
+      if (data?.userId) {
+        localStorage.setItem('actecal_userId', String(data.userId));
+        this.userId = String(data.userId);
+      }
+      if (data?.expiresAt) {
+        sessionStorage.setItem('actecal_share_session_expiry', data.expiresAt);
+      }
+    } catch (err) {
+      console.warn('[SHARE] Failed to persist share session:', err);
+    }
+
+    return data;
   }
 
   // ────────────────────────────────────────────────
