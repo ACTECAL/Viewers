@@ -459,11 +459,16 @@ function ToolbarPlugin({
     }
   }, [studyUid, editorInstanceRef]);
 
+  // Forward ref for flushing accumulated chunks to GCS in fallback mode
+  const flushAccumulatedChunksToGcsRef = useRef<() => Promise<void>>(async () => {});
+
   const {
     startScribeSync,
     finalizeConsultation,
     reportStatus,
     transport,
+    serverHealth,
+    isFallback: isScribeFallback,
     liveTranscript: scribeTranscript,
     runningSummary: scribeSummary,
   } = useClinicalScribe({
@@ -473,7 +478,22 @@ function ToolbarPlugin({
     testType: testType || 'consultation',
     editorInstanceRef,
     onLexicalApplied: handleLexicalApplied,
+    onFallbackActivated: () => {
+      console.warn('[scribe] onFallbackActivated received -> enabling chunk uploads for Cloud Run');
+      isFallbackActiveRef.current = true;
+      flushAccumulatedChunksToGcsRef.current();
+    },
+    ensureChunksUploaded: async () => {
+      await flushAccumulatedChunksToGcsRef.current();
+    },
   });
+
+  useEffect(() => {
+    if (transport === 'polling') {
+      isFallbackActiveRef.current = true;
+      flushAccumulatedChunksToGcsRef.current();
+    }
+  }, [transport]);
 
   useEffect(() => {
     if (scribeTranscript !== undefined) {
@@ -491,18 +511,32 @@ function ToolbarPlugin({
     onRecordingChange?.(isRecording);
   }, [isRecording, onRecordingChange]);
 
-  // Transport badge. The switch to REST polling is meant to be invisible to the
-  // doctor, but a silent handover is indistinguishable from "AI stopped
-  // working" - one glance at this is the difference between a support call and
-  // a five-second fix.
-  const transportBadge =
-    transport === 'websocket'
-      ? { label: 'Live (WS)', className: 'text-green-700 border-green-300 bg-green-50' }
-      : transport === 'polling'
-        ? { label: 'Fallback polling', className: 'text-amber-700 border-amber-300 bg-amber-50' }
-        : reportStatus === 'connecting'
-          ? { label: 'Connecting...', className: 'text-gray-500 border-gray-300 bg-gray-50' }
-          : null;
+  // Server Fallback Signal (Green = Primary GPU, Orange = Fallback to Secondary Server)
+  const isFallbackServer = isScribeFallback || isFallbackActiveRef.current || transport === 'polling' || serverHealth === 'fallback';
+
+  const serverSignalBadge = {
+    isFallback: isFallbackServer,
+    dotClass: isFallbackServer
+      ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.9)] animate-pulse'
+      : serverHealth === 'checking'
+        ? 'bg-gray-400'
+        : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]',
+    pillClass: isFallbackServer
+      ? 'text-amber-800 border-amber-300 bg-amber-50'
+      : serverHealth === 'checking'
+        ? 'text-gray-600 border-gray-300 bg-gray-50'
+        : 'text-emerald-800 border-emerald-300 bg-emerald-50',
+    label: isFallbackServer
+      ? 'Fallback: Secondary Server'
+      : serverHealth === 'checking'
+        ? 'Checking Server...'
+        : transport === 'websocket'
+          ? 'Live (WS)'
+          : 'Primary Server',
+    tooltip: isFallbackServer
+      ? 'Fallback to secondary servers. Response might be delayed by few seconds.'
+      : 'Primary GPU Server connected (Real-time STT)',
+  };
 
   // The MediaRecorder callback is created once (inside startRecording) and, on
   // its own, would keep capturing the scribe functions from the render where
@@ -583,10 +617,60 @@ function ToolbarPlugin({
   // chunks for the WS catch-up flush.
   const recordingMimeTypeRef = useRef<string>('audio/webm');
 
+  // Fallback mode state: when GPU WebSocket is healthy, audio chunks are kept in memory
+  // and NOT uploaded to GCS (to avoid firing Pub/Sub webhooks that spin up Cloud Run and incur costs).
+  // Chunks are ONLY uploaded to GCS if WebSocket fails or goes down (fallback mode).
+  const isFallbackActiveRef = useRef<boolean>(false);
+  const lastUploadedChunkIndexRef = useRef<number>(0);
+  const isFlushingChunksRef = useRef<boolean>(false);
+
   // Real-time 250ms audio streaming (Web Audio API 16kHz PCM)
   const audioContextRef = useRef<AudioContext | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const isRecordingRef = useRef<boolean>(false);
+
+  const fetchRecordingConfig = async () => {
+    try {
+      const apiService = new ApiService();
+      const refId = (erpRefId || studyUid || 'unknown');
+      const res = await apiService.getRecordingConfig(refId);
+      // Backend sendResponse nests as { status, data: {...} }. Raw json (via
+      // authFetch) gives res.data = the config object; some callers also hold
+      // an axios-like { data: { data } } shape, so accept both.
+      const d = res?.data?.data || res?.data;
+      console.log('[scribe] fetchRecordingConfig for refId=', refId, 'parsed d=', d);
+      if (d?.google_token && d?.bucket_details?.bucketName && d?.recording_path) {
+        // Backend may return visit id under visit_id, visitId, or visitID.
+        // Accept all shapes and coerce to string for consistent comparison.
+        const rawVisitId = d?.visit_id || d?.visitId || d?.visitID;
+        const visitIdStr = rawVisitId != null && String(rawVisitId).trim() !== '' ? String(rawVisitId) : '';
+        // Tenant embedded in the recording_path (erp-files/<tenant>/...) wins,
+        // then the URL ?tenant= param, then config/localStorage.
+        const pathTenant = (d?.recording_path?.split('/') || [])[1];
+        const effectiveTenant =
+          pathTenant ||
+          new URLSearchParams(window.location.search).get('tenant') ||
+          window.config?.tenant ||
+          localStorage.getItem('tenantName') ||
+          '';
+        if (effectiveTenant) setTenantName(effectiveTenant);
+        recordingConfigRef.current = {
+          token: d.google_token,
+          bucket: d.bucket_details.bucketName,
+          prefix: d.recording_path,
+          visitId: visitIdStr || null,
+          tenant: effectiveTenant || null,
+        };
+        recordingConfigForRefRef.current = refId;
+        setVisitId(visitIdStr);
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to fetch recording config:', err);
+    }
+    console.warn('[scribe] fetchRecordingConfig FAILED for refId=', erpRefId || studyUid);
+    return false;
+  };
 
   const uploadToGcpPath = async (blob: Blob, fileName: string, mimeType: string, basePath?: string, metadata: Record<string, string> = {}) => {
     const cfg = recordingConfigRef.current;
@@ -643,21 +727,99 @@ function ToolbarPlugin({
     return prepared;
   }, []);
 
+  // Flushes all accumulated audio slices in memory to the linked GCS folder
+  // when fallback mode is activated, allowing Cloud Run to pick up the session.
+  const flushAccumulatedChunksToGcs = useCallback(async () => {
+    if (isFlushingChunksRef.current) return;
+    isFlushingChunksRef.current = true;
+    try {
+      let cfg = recordingConfigRef.current;
+      if (!cfg?.token || !cfg?.bucket || !cfg?.prefix) {
+        await fetchRecordingConfig();
+        cfg = recordingConfigRef.current;
+      }
+      if (!cfg?.token || !cfg?.bucket || !cfg?.prefix) {
+        console.warn('[scribe] Cannot flush chunks to GCP: recording config missing');
+        return;
+      }
+
+      console.warn('[scribe] ⚠️ Fallback activated: uploading accumulated audio chunks to GCS linked folder for Cloud Run');
+      const mime = recordingMimeTypeRef.current || 'audio/webm';
+      const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+
+      while (lastUploadedChunkIndexRef.current < recordingChunksRef.current.length) {
+        const idx = lastUploadedChunkIndexRef.current;
+        const rawBlob = recordingChunksRef.current[idx];
+        if (rawBlob) {
+          try {
+            const uploadBlob = await buildStandaloneChunk(rawBlob, mime);
+            const meta = idx === 0 ? {
+              'x-goog-meta-department': department || 'general',
+              'x-goog-meta-test_type': testType || 'consultation',
+              'x-goog-meta-tenant': tenantName || '',
+            } : {};
+            const ok = await uploadToGcpPath(uploadBlob, `chunk_${idx}.${ext}`, mime, undefined, meta);
+            console.log(`[scribe] Fallback catch-up: chunk_${idx}.${ext} uploaded to GCS, ok=${ok}`);
+            if (ok) {
+              lastUploadedChunkIndexRef.current = idx + 1;
+            } else {
+              break;
+            }
+          } catch (err) {
+            console.error(`[scribe] Fallback catch-up failed for chunk_${idx}:`, err);
+            break;
+          }
+        } else {
+          lastUploadedChunkIndexRef.current = idx + 1;
+        }
+      }
+    } finally {
+      isFlushingChunksRef.current = false;
+    }
+  }, [buildStandaloneChunk, department, testType, tenantName]);
+  flushAccumulatedChunksToGcsRef.current = flushAccumulatedChunksToGcs;
+
   const handleAudioChunk = async (blob: Blob, mimeType: string) => {
     recordingMimeTypeRef.current = mimeType;
-    const uploadBlob = await buildStandaloneChunk(blob, mimeType);
-    const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
     const index = recordingChunkIndexRef.current;
     recordingChunkIndexRef.current += 1;
+
+    // Extract container header on first chunk so it's ready if fallback happens later
+    if (index === 0 && !containerHeaderRef.current) {
+      try {
+        const buffer = await blob.arrayBuffer();
+        const headerEnd = extractContainerHeader(buffer, mimeType);
+        if (headerEnd !== null && headerEnd > 0 && headerEnd < buffer.byteLength) {
+          containerHeaderRef.current = buffer.slice(0, headerEnd);
+        }
+      } catch (e) {
+        console.warn('[scribe] Could not extract container header from chunk 0:', e);
+      }
+    }
+
+    // Normal mode: WebSocket is active. Do NOT upload chunks to GCS.
+    // This avoids triggering GCS Pub/Sub and prevents unnecessary Cloud Run billing.
+    if (!isFallbackActiveRef.current) {
+      console.log(`[scribe] Normal WebSocket mode: holding 30s chunk_${index} in memory buffer (Cloud Run spared)`);
+      return;
+    }
+
+    // Fallback mode: GPU is down or unreachable.
+    // Upload this chunk to GCS to trigger Cloud Run transcription!
+    const uploadBlob = await buildStandaloneChunk(blob, mimeType);
+    const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
     const meta = index === 0
       ? {
-          'x-goog-meta-department': department || '',
-          'x-goog-meta-test_type': testType || '',
+          'x-goog-meta-department': department || 'general',
+          'x-goog-meta-test_type': testType || 'consultation',
+          'x-goog-meta-tenant': tenantName || '',
         }
       : {};
-    // Upload 30s chunk to GCS for Cloud Run fallback & complete archival
     const ok = await uploadToGcpPath(uploadBlob, `chunk_${index}.${ext}`, mimeType, undefined, meta);
-    console.log('[scribe] 30s chunk', index, 'uploaded to GCP, ok=', ok);
+    console.log(`[scribe] Fallback mode: 30s chunk_${index} uploaded to GCP, ok=`, ok);
+    if (ok) {
+      lastUploadedChunkIndexRef.current = Math.max(lastUploadedChunkIndexRef.current, index + 1);
+    }
   };
   handleAudioChunkRef.current = handleAudioChunk;
 
@@ -681,6 +843,16 @@ function ToolbarPlugin({
     } catch (err) {
       console.warn('[scribe] handleStopRecording: recorder.stop() threw', err);
     }
+
+    // If fallback mode was active, ensure all chunks up to the final one are uploaded to GCS
+    if (isFallbackActiveRef.current) {
+      try {
+        await flushAccumulatedChunksToGcs();
+      } catch (flushErr) {
+        console.error('[scribe] Final fallback chunk flush error:', flushErr);
+      }
+    }
+
     const mimeType = recorder?.mimeType || 'audio/webm';
     const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
     recordingChunksRef.current = [];
@@ -723,49 +895,6 @@ function ToolbarPlugin({
     } catch (err) {
       console.error('[scribe] finalizeConsultation threw:', err);
     }
-  };
-
-  const fetchRecordingConfig = async () => {
-    try {
-      const apiService = new ApiService();
-      const refId = (erpRefId || studyUid || 'unknown');
-      const res = await apiService.getRecordingConfig(refId);
-      // Backend sendResponse nests as { status, data: {...} }. Raw json (via
-      // authFetch) gives res.data = the config object; some callers also hold
-      // an axios-like { data: { data } } shape, so accept both.
-      const d = res?.data?.data || res?.data;
-      console.log('[scribe] fetchRecordingConfig for refId=', refId, 'parsed d=', d);
-      if (d?.google_token && d?.bucket_details?.bucketName && d?.recording_path) {
-        // Backend may return visit id under visit_id, visitId, or visitID.
-        // Accept all shapes and coerce to string for consistent comparison.
-        const rawVisitId = d?.visit_id || d?.visitId || d?.visitID;
-        const visitIdStr = rawVisitId != null && String(rawVisitId).trim() !== '' ? String(rawVisitId) : '';
-        // Tenant embedded in the recording_path (erp-files/<tenant>/...) wins,
-        // then the URL ?tenant= param, then config/localStorage.
-        const pathTenant = (d?.recording_path?.split('/') || [])[1];
-        const effectiveTenant =
-          pathTenant ||
-          new URLSearchParams(window.location.search).get('tenant') ||
-          window.config?.tenant ||
-          localStorage.getItem('tenantName') ||
-          '';
-        if (effectiveTenant) setTenantName(effectiveTenant);
-        recordingConfigRef.current = {
-          token: d.google_token,
-          bucket: d.bucket_details.bucketName,
-          prefix: d.recording_path,
-          visitId: visitIdStr || null,
-          tenant: effectiveTenant || null,
-        };
-        recordingConfigForRefRef.current = refId;
-        setVisitId(visitIdStr);
-        return true;
-      }
-    } catch (err) {
-      console.error('Failed to fetch recording config:', err);
-    }
-    console.warn('[scribe] fetchRecordingConfig FAILED for refId=', erpRefId || studyUid);
-    return false;
   };
 
   // Shared recording start: fetches GCP config (keyed by ref id / receipt no),
@@ -841,6 +970,9 @@ function ToolbarPlugin({
       scribeSyncScheduledRef.current = true;
       wsSentCountRef.current = 0;
       recordingMimeTypeRef.current = mimeType;
+      isFallbackActiveRef.current = false;
+      lastUploadedChunkIndexRef.current = 0;
+      isFlushingChunksRef.current = false;
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -969,8 +1101,9 @@ function ToolbarPlugin({
   const buttonClass = "px-1.5 py-0.5 min-w-[28px] bg-white rounded flex items-center justify-center hover:bg-gray-100 hover:text-black transition-colors border border-gray-300 shadow-sm text-gray-700";
 
   return (
-    <div className="flex flex-wrap gap-1 p-1 bg-white border-b border-gray-300 items-center text-sm sticky top-0 z-10 text-gray-800 shadow-sm overflow-visible">
-      {!isExpanded ? (
+    <div className="sticky top-0 z-10 w-full flex flex-col">
+      <div className="flex flex-wrap gap-1 p-1 bg-white border-b border-gray-300 items-center text-sm text-gray-800 shadow-sm overflow-visible">
+        {!isExpanded ? (
         <div className="flex flex-col gap-1 w-full overflow-hidden">
           <div className="flex flex-nowrap gap-1 items-center w-full">
             <button
@@ -981,14 +1114,14 @@ function ToolbarPlugin({
               {isRecording ? '🛑 Rec...' : '🎤 Record'}
             </button>
 
-            {transportBadge && (
-              <span
-                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold ${transportBadge.className}`}
-                title={transport === 'websocket' ? 'Live transcription over GPU WebSocket' : 'GPU WebSocket unreachable - using Cloud Run REST polling'}
-              >
-                {transportBadge.label}
-              </span>
-            )}
+            {/* Server Fallback Signal (Green to Orange) */}
+            <span
+              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold flex items-center gap-1.5 cursor-default transition-all ${serverSignalBadge.pillClass}`}
+              title={serverSignalBadge.tooltip}
+            >
+              <span className={`w-2 h-2 rounded-full ${serverSignalBadge.dotClass}`} />
+              {serverSignalBadge.label}
+            </span>
 
             <div className="w-px h-5 bg-gray-300 mx-0.5 shrink-0"></div>
 
@@ -1106,14 +1239,14 @@ function ToolbarPlugin({
             {isRecording ? '🛑 Recording...' : '🎤 Record'}
           </button>
 
-          {transportBadge && (
-            <span
-              className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold ${transportBadge.className}`}
-              title={transport === 'websocket' ? 'Live transcription over GPU WebSocket' : 'GPU WebSocket unreachable - using Cloud Run REST polling'}
-            >
-              {transportBadge.label}
-            </span>
-          )}
+          {/* Server Fallback Signal (Green to Orange) */}
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold flex items-center gap-1.5 cursor-default transition-all ${serverSignalBadge.pillClass}`}
+            title={serverSignalBadge.tooltip}
+          >
+            <span className={`w-2 h-2 rounded-full ${serverSignalBadge.dotClass}`} />
+            {serverSignalBadge.label}
+          </span>
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
 
@@ -1157,6 +1290,20 @@ function ToolbarPlugin({
         </>
       )}
     </div>
+
+    {/* Fallback Notice Banner (Green to Orange transition) */}
+    {isFallbackServer && (
+      <div className="w-full bg-amber-50/95 border-b border-amber-200 text-amber-900 text-[11px] px-2.5 py-1 flex items-center justify-between gap-1 font-medium transition-all shadow-sm">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+          <span>Fallback to secondary servers. Response might be delayed by few seconds.</span>
+        </div>
+        <span className="text-[9px] text-amber-800 font-bold bg-amber-200/80 px-1.5 py-0.5 rounded border border-amber-300 uppercase tracking-wider shrink-0">
+          Cloud Fallback Active
+        </span>
+      </div>
+    )}
+  </div>
   );
 }
 

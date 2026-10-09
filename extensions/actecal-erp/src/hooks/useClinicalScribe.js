@@ -25,14 +25,43 @@ export const useClinicalScribe = ({
   onLexicalApplied = null,
   onRealtimeTranscript = null,
   onRunningSummaryUpdate = null,
+  onFallbackActivated = null,
+  ensureChunksUploaded = null,
 }) => {
   const [reportStatus, setReportStatus] = useState('idle');
   // idle | connecting | connected-ws | fallback-polling | finalizing | finalized | error
   const [liveTranscript, setLiveTranscript] = useState('');
   const [runningSummary, setRunningSummary] = useState('');
   const [transport, setTransport] = useState(null); // 'websocket' | 'polling' | null
+  const [serverHealth, setServerHealth] = useState('checking'); // 'healthy' | 'fallback' | 'checking'
   const [isRecording, setIsRecording] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
+
+  const onFallbackActivatedRef = useRef(onFallbackActivated);
+  onFallbackActivatedRef.current = onFallbackActivated;
+  const ensureChunksUploadedRef = useRef(ensureChunksUploaded);
+  ensureChunksUploadedRef.current = ensureChunksUploaded;
+
+  // Proactive GPU /health probe on mount and every 15s so server status signal is known
+  useEffect(() => {
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const ok = await ScribeSocketService.checkHealth();
+        if (!cancelled) {
+          setServerHealth(ok ? 'healthy' : 'fallback');
+        }
+      } catch (_) {
+        if (!cancelled) setServerHealth('fallback');
+      }
+    };
+    probe();
+    const timer = setInterval(probe, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const pollingTimerRef = useRef(null);
   // The doctor-facing session flag. Async callbacks check this before touching
@@ -141,7 +170,11 @@ export const useClinicalScribe = ({
     console.warn(`[scribe] WebSocket unavailable - falling back to REST polling every ${pollIntervalMs}ms`);
     setActiveTransport(TRANSPORT.POLLING);
     setStatus('fallback-polling');
+    setServerHealth('fallback');
     pollAttemptsRef.current = 0;
+
+    // Notify caller that fallback is activated so it uploads any buffered chunks to GCS
+    onFallbackActivatedRef.current?.();
 
     pollingTimerRef.current = setInterval(async () => {
       const epochAtRequest = epochRef.current;
@@ -213,6 +246,7 @@ export const useClinicalScribe = ({
         epochRef.current += 1;
         setActiveTransport(TRANSPORT.WEBSOCKET);
         setStatus('connected-ws');
+        setServerHealth('healthy');
         stopFallbackPolling();
       } else if (state === 'connecting' && activeRef.current) {
         setStatus('connecting');
@@ -338,7 +372,10 @@ export const useClinicalScribe = ({
 
     if (!started) {
       console.log('[scribe] GPU /health down or WebSocket unavailable -> using Cloud Run fallback polling');
+      setServerHealth('fallback');
       startFallbackPolling();
+    } else {
+      setServerHealth('healthy');
     }
     return true;
   }, [department, testType, setStatus, startFallbackPolling]);
@@ -393,6 +430,13 @@ export const useClinicalScribe = ({
 
       // Fallback: Cloud Run end-meeting.
       try {
+        if (ensureChunksUploadedRef.current) {
+          try {
+            await ensureChunksUploadedRef.current();
+          } catch (flushErr) {
+            console.error('[scribe] ensureChunksUploaded failed before end-meeting:', flushErr);
+          }
+        }
         const { transcribeBaseUrl } = scribeConfig();
         const response = await fetch(`${transcribeBaseUrl}/${activeTenant}/${activeVisit}/end-meeting`, {
           method: 'POST',
@@ -451,6 +495,8 @@ export const useClinicalScribe = ({
     isRecording,
     isFinalizing,
     reportStatus,
+    serverHealth,
+    isFallback: serverHealth === 'fallback' || transport === 'polling',
     liveTranscript,
     runningSummary,
     transport,
