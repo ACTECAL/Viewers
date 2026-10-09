@@ -19,26 +19,67 @@ const getApiBaseUrl = () => window.config?.apiBaseUrl;
 // ────────────────────────────────────────────────
 const TENANT_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/i;
 
+// const getTenant = () => {
+//   let stored = null;
+
+//   try {
+//     stored = localStorage.getItem('tenantName');
+//   } catch (err) {
+//     // storage unavailable (private mode, quota, ...) - fall through to config
+//   }
+
+//   if (stored && TENANT_PATTERN.test(stored)) {
+//     return stored;
+//   }
+
+//   if (stored) {
+//     console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+//   }
+
+//   return window.config?.tenant;
+// };
+
+
 const getTenant = () => {
-  let stored = null;
-
+  // 1. Get tenant from current URL hostname
   try {
-    stored = localStorage.getItem('tenantName');
+    const hostname = window.location.hostname;
+    const subdomain = hostname.split('.')[0];
+
+    if (
+      hostname.endsWith('.spectra.actecal.com') &&
+      TENANT_PATTERN.test(subdomain)
+    ) {
+      return subdomain;
+    }
   } catch (err) {
-    // storage unavailable (private mode, quota, ...) - fall through to config
+    // Fall through to localStorage and config
   }
 
-  if (stored && TENANT_PATTERN.test(stored)) {
-    return stored;
+  // 2. Fallback to localStorage
+  try {
+    const stored = localStorage.getItem('tenantName');
+
+    if (stored && TENANT_PATTERN.test(stored)) {
+      return stored;
+    }
+
+    if (stored) {
+      console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+    }
+  } catch (err) {
+    // Storage unavailable - fall through to config
   }
 
-  if (stored) {
-    console.warn('[AUTH] Ignoring malformed tenantName in storage:', stored);
+  // 3. Final fallback to config
+  const configTenant = window.config?.tenant;
+
+  if (configTenant && TENANT_PATTERN.test(configTenant)) {
+    return configTenant;
   }
 
-  return window.config?.tenant;
+  return undefined;
 };
-
 // userId arrives via ?userId= and is written to storage by App.tsx. Falling back
 // to it here matters because several call sites construct ApiService with no
 // argument, and endpoints such as /dicom/gcp-token answer 401 without x-user-id
