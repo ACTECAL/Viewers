@@ -25,6 +25,8 @@ export const useClinicalScribe = ({
   onLexicalApplied = null,
   onRealtimeTranscript = null,
   onRunningSummaryUpdate = null,
+  onFallbackActivated = null,
+  ensureChunksUploaded = null,
 }) => {
   const [reportStatus, setReportStatus] = useState('idle');
   // idle | connecting | connected-ws | fallback-polling | finalizing | finalized | error
@@ -33,6 +35,11 @@ export const useClinicalScribe = ({
   const [transport, setTransport] = useState(null); // 'websocket' | 'polling' | null
   const [isRecording, setIsRecording] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
+
+  const onFallbackActivatedRef = useRef(onFallbackActivated);
+  onFallbackActivatedRef.current = onFallbackActivated;
+  const ensureChunksUploadedRef = useRef(ensureChunksUploaded);
+  ensureChunksUploadedRef.current = ensureChunksUploaded;
 
   const pollingTimerRef = useRef(null);
   // The doctor-facing session flag. Async callbacks check this before touching
@@ -142,6 +149,9 @@ export const useClinicalScribe = ({
     setActiveTransport(TRANSPORT.POLLING);
     setStatus('fallback-polling');
     pollAttemptsRef.current = 0;
+
+    // Notify caller that fallback is activated so it uploads any buffered chunks to GCS
+    onFallbackActivatedRef.current?.();
 
     pollingTimerRef.current = setInterval(async () => {
       const epochAtRequest = epochRef.current;
@@ -393,6 +403,13 @@ export const useClinicalScribe = ({
 
       // Fallback: Cloud Run end-meeting.
       try {
+        if (ensureChunksUploadedRef.current) {
+          try {
+            await ensureChunksUploadedRef.current();
+          } catch (flushErr) {
+            console.error('[scribe] ensureChunksUploaded failed before end-meeting:', flushErr);
+          }
+        }
         const { transcribeBaseUrl } = scribeConfig();
         const response = await fetch(`${transcribeBaseUrl}/${activeTenant}/${activeVisit}/end-meeting`, {
           method: 'POST',
