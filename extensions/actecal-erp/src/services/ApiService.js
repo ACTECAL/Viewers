@@ -660,6 +660,10 @@ class ApiService {
     return authFetch(`${this.baseUrl}/get-draft-report?studyInstanceUid=${studyInstanceUid}`);
   }
 
+  async fetchDraftReport(studyInstanceUid) {
+    return this.getDraftReport(studyInstanceUid);
+  }
+
   async getAutoFillTemplate(studyInstanceUid) {
     return authFetch(
       `${this.baseUrl}/get-auto-fill-template?studyInstanceUid=${encodeURIComponent(studyInstanceUid)}`
@@ -672,7 +676,7 @@ class ApiService {
     );
   }
 
-  async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType }) {
+  async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType, transcript, aiNotes }) {
     return authFetch(`${this.baseUrl}/submit-report-erp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -681,6 +685,8 @@ class ApiService {
         template,
         pdfBase64,
         reportType,
+        transcript,
+        aiNotes,
       }),
     });
   }

@@ -205,34 +205,55 @@ function MeasurementInjectionPlugin() {
       const measurement = e.detail?.measurement;
       if (!measurement) return;
 
+      let displayText = 'Measurement added';
+      // Try to intelligently parse OHIF measurement text
+      if (measurement.displayText) {
+        if (Array.isArray(measurement.displayText)) {
+          displayText = measurement.displayText.join(', ');
+        } else if (typeof measurement.displayText === 'object') {
+          const primary = measurement.displayText.primary;
+          if (Array.isArray(primary)) {
+            displayText = primary.join(', ');
+          } else if (primary) {
+            displayText = primary.toString();
+          } else {
+            displayText = JSON.stringify(measurement.displayText);
+          }
+        } else {
+          displayText = String(measurement.displayText);
+        }
+      } else if (measurement.text) {
+        displayText = measurement.text;
+      } else if (measurement.toolName) {
+        displayText = `${measurement.toolName} annotation recorded.`;
+      }
+
+      const payload = {
+        toolName: measurement.toolName || 'Measurement',
+        displayText: displayText,
+        value: measurement.value,
+        unit: measurement.unit || '',
+        description: measurement.description || measurement.label || measurement.text || '',
+        seriesDescription: measurement.metadata?.SeriesDescription || '',
+        modality: measurement.metadata?.Modality || '',
+        referencedSeriesUid: measurement.referenceSeriesUID || '',
+      };
+
+      // 1. If AI Clinical Scribe WebSocket is connected, forward to AI so LLM contextually places it
+      if (ScribeSocketService.isOpen()) {
+        console.log('[MeasurementInjectionPlugin] Forwarding live DICOM measurement to AI Clinical Scribe:', payload);
+        const sent = ScribeSocketService.send({
+          action: 'dicom_measurement',
+          measurement: payload,
+        });
+        if (sent) return;
+      }
+
+      // 2. Offline Fallback: append bullet if scribe socket is disconnected
       editor.update(() => {
         const root = $getRoot();
-
-        let textToAppend = 'Measurement added';
-        // Try to intelligently parse OHIF measurement text
-        if (measurement.displayText) {
-          if (Array.isArray(measurement.displayText)) {
-            textToAppend = measurement.displayText.join(', ');
-          } else if (typeof measurement.displayText === 'object') {
-            const primary = measurement.displayText.primary;
-            if (Array.isArray(primary)) {
-              textToAppend = primary.join(', ');
-            } else if (primary) {
-              textToAppend = primary.toString();
-            } else {
-              textToAppend = JSON.stringify(measurement.displayText);
-            }
-          } else {
-            textToAppend = String(measurement.displayText);
-          }
-        } else if (measurement.text) {
-            textToAppend = measurement.text;
-        } else if (measurement.toolName) {
-            textToAppend = `${measurement.toolName} annotation recorded.`;
-        }
-
         const paragraphNode = $createParagraphNode();
-        paragraphNode.append($createTextNode(`• ${textToAppend}`));
+        paragraphNode.append($createTextNode(`• ${displayText}`));
         root.append(paragraphNode);
       });
     };
@@ -257,7 +278,37 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
+function TextInjectionPlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const handleInsert = (e: any) => {
+      const text = e.detail?.text;
+      if (!text) return;
+      editor.update(() => {
+        const root = $getRoot();
+        const paragraphNode = $createParagraphNode();
+        paragraphNode.append($createTextNode(text));
+        root.append(paragraphNode);
+      });
+    };
+
+    window.addEventListener('actecal:insertTextToReport', handleInsert);
+    return () => window.removeEventListener('actecal:insertTextToReport', handleInsert);
+  }, [editor]);
+
+  return null;
+}
+
+function SubmitReportPlugin({
+  studyUid,
+  transcriptRef,
+  aiNotesRef,
+}: {
+  studyUid: string;
+  transcriptRef?: React.MutableRefObject<string>;
+  aiNotesRef?: React.MutableRefObject<string>;
+}) {
   const [editor] = useLexicalComposerContext();
   const { servicesManager } = useSystem();
   const { uiNotificationService } = servicesManager.services;
@@ -308,8 +359,7 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
         });
 
         // 3. Submit via backend (erp-ui Receipt.js equivalent): backend uploads
-        //    lexical + pdf to S3 and saves into test_reports via addTestReports,
-        //    so the finalized report appears in erp identically.
+        //    lexical + pdf + transcript + aiNotes to S3 and saves into test_reports
         const apiService = new ApiService();
         const pdfBase64 = await blobToBase64(pdfBlob);
 
@@ -318,6 +368,8 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
           template: JSON.stringify(jsonState),
           pdfBase64,
           reportType: 'final',
+          transcript: transcriptRef?.current || '',
+          aiNotes: aiNotesRef?.current || '',
         });
 
         uiNotificationService.show({
@@ -342,12 +394,32 @@ function SubmitReportPlugin({ studyUid }: { studyUid: string }) {
     return () => {
       window.removeEventListener('trigger-submit-report', handleSubmit);
     };
-  }, [editor, studyUid, uiNotificationService]);
+  }, [editor, studyUid, uiNotificationService, transcriptRef, aiNotesRef]);
 
   return null;
 }
 
-function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, resolvedVisitId }) {
+function ToolbarPlugin({
+  isExpanded,
+  studyUid,
+  erpRefId,
+  department,
+  testType,
+  resolvedVisitId,
+  onTranscriptChange,
+  onNotesChange,
+  onRecordingChange,
+}: {
+  isExpanded: boolean;
+  studyUid: string;
+  erpRefId: string;
+  department: string;
+  testType: string;
+  resolvedVisitId?: string;
+  onTranscriptChange?: (text: string) => void;
+  onNotesChange?: (notes: string) => void;
+  onRecordingChange?: (rec: boolean) => void;
+}) {
   const [editor] = useLexicalComposerContext();
   const [isRecording, setIsRecording] = useState(false);
   const [blockType, setBlockType] = useState('paragraph');
@@ -386,7 +458,15 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
       console.warn('[scribe] could not cache pushed lexical state:', err);
     }
   }, [studyUid, editorInstanceRef]);
-  const { startScribeSync, finalizeConsultation, reportStatus, transport } = useClinicalScribe({
+
+  const {
+    startScribeSync,
+    finalizeConsultation,
+    reportStatus,
+    transport,
+    liveTranscript: scribeTranscript,
+    runningSummary: scribeSummary,
+  } = useClinicalScribe({
     tenantName,
     visitId: finalVisitId,
     department: department || 'general',
@@ -394,6 +474,22 @@ function ToolbarPlugin({ isExpanded, studyUid, erpRefId, department, testType, r
     editorInstanceRef,
     onLexicalApplied: handleLexicalApplied,
   });
+
+  useEffect(() => {
+    if (scribeTranscript !== undefined) {
+      onTranscriptChange?.(scribeTranscript);
+    }
+  }, [scribeTranscript, onTranscriptChange]);
+
+  useEffect(() => {
+    if (scribeSummary !== undefined) {
+      onNotesChange?.(scribeSummary);
+    }
+  }, [scribeSummary, onNotesChange]);
+
+  useEffect(() => {
+    onRecordingChange?.(isRecording);
+  }, [isRecording, onRecordingChange]);
 
   // Transport badge. The switch to REST polling is meant to be invisible to the
   // doctor, but a silent handover is indistinguishable from "AI stopped
@@ -1357,6 +1453,28 @@ function ReportingPanel() {
   const [showHistory, setShowHistory] = useState(false);
   const urlSeedAppliedRef = useRef(false);
 
+  // ── Multi-view Switcher: Report, Notes, Transcript ──
+  const [viewMode, setViewMode] = useState<'report' | 'notes' | 'transcript'>('report');
+  const [liveTranscript, setLiveTranscript] = useState<string>('');
+  const [aiNotes, setAiNotes] = useState<string>('');
+  const [isScribeRecording, setIsScribeRecording] = useState<boolean>(false);
+  const transcriptRef = useRef<string>('');
+  const aiNotesRef = useRef<string>('');
+
+  const handleTranscriptChange = useCallback((text: string) => {
+    setLiveTranscript(text);
+    transcriptRef.current = text;
+  }, []);
+
+  const handleNotesChange = useCallback((notes: string) => {
+    setAiNotes(notes);
+    aiNotesRef.current = notes;
+  }, []);
+
+  const handleRecordingChange = useCallback((rec: boolean) => {
+    setIsScribeRecording(rec);
+  }, []);
+
   // Fetch available report templates from the backend (ERP get-templates)
   useEffect(() => {
     let cancelled = false;
@@ -1448,10 +1566,20 @@ function ReportingPanel() {
   useEffect(() => {
     if (!studyUid) {
       setDraftContent('');
+      setLiveTranscript('');
+      setAiNotes('');
+      transcriptRef.current = '';
+      aiNotesRef.current = '';
+      setViewMode('report');
       return;
     }
 
     let cancelled = false;
+    setLiveTranscript('');
+    setAiNotes('');
+    transcriptRef.current = '';
+    aiNotesRef.current = '';
+    setViewMode('report');
 
     const loadStudyContent = async () => {
       try {
@@ -1511,6 +1639,14 @@ function ReportingPanel() {
             if (!cancelled) setDraftContent(response.report);
           } else if (!cancelled) {
             setDraftContent('');
+          }
+          if (response && response.transcript && !cancelled) {
+            setLiveTranscript(response.transcript);
+            transcriptRef.current = response.transcript;
+          }
+          if (response && response.aiNotes && !cancelled) {
+            setAiNotes(response.aiNotes);
+            aiNotesRef.current = response.aiNotes;
           }
         } catch (apiError) {
           console.warn('API fetch failed, falling back to default text', apiError);
@@ -1572,7 +1708,19 @@ function ReportingPanel() {
   return (
     <div className="flex flex-col h-full bg-primary-dark p-2 text-white relative">
       <div className="flex justify-between items-center mb-2">
-        <h3 className="text-lg font-bold">Create Report</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-bold">Create Report</h3>
+          <select
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as any)}
+            className="text-xs bg-secondary-main border border-secondary-light rounded px-2 py-1 text-white font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-sm hover:bg-secondary-light transition-colors"
+            title="Switch between Report, AI Notes, and Live Transcript"
+          >
+            <option value="report">📄 Report</option>
+            <option value="notes">📝 Notes {aiNotes ? '•' : ''}</option>
+            <option value="transcript">🎙️ Transcript {liveTranscript ? '•' : ''}</option>
+          </select>
+        </div>
         <div className="flex items-center gap-1">
           <select
             value={selectedTemplateId}
@@ -1614,7 +1762,19 @@ function ReportingPanel() {
         }`}>
           {isExpanded && (
             <div className="flex justify-between items-center px-6 py-4 bg-gray-50 border-b border-gray-200 shrink-0">
-              <h2 className="text-xl font-semibold text-gray-800 tracking-tight">Create Report</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-semibold text-gray-800 tracking-tight">Create Report</h2>
+                <select
+                  value={viewMode}
+                  onChange={(e) => setViewMode(e.target.value as any)}
+                  className="text-xs bg-white border border-gray-300 rounded px-2.5 py-1 text-gray-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-sm"
+                  title="Switch between Report, AI Notes, and Live Transcript"
+                >
+                  <option value="report">📄 Report</option>
+                  <option value="notes">📝 Notes {aiNotes ? '•' : ''}</option>
+                  <option value="transcript">🎙️ Transcript {liveTranscript ? '•' : ''}</option>
+                </select>
+              </div>
               <button
                 onClick={() => setIsExpanded(false)}
                 className="text-gray-500 hover:text-gray-800 hover:bg-gray-200 p-2 rounded-full transition-colors flex items-center justify-center"
@@ -1624,31 +1784,157 @@ function ReportingPanel() {
               </button>
             </div>
           )}
-          <LexicalComposer initialConfig={initialConfig}>
-            <div
-              ref={editorContainerRef}
-              className="h-full w-full relative flex flex-col flex-1"
-              onKeyDown={(e) => e.stopPropagation()}
-              onKeyUp={(e) => e.stopPropagation()}
-              onKeyPress={(e) => e.stopPropagation()}
-            >
-              <ToolbarPlugin isExpanded={isExpanded} studyUid={studyUid} erpRefId={erpRefId} department={departmentId} testType={testId} resolvedVisitId={resolvedVisitId} />
-              <div className="flex-1 relative overflow-y-auto bg-white text-black">
-                <RichTextPlugin
-                  contentEditable={<ContentEditable className={`h-full w-full outline-none resize-none p-4 ${isExpanded ? 'text-lg leading-relaxed max-w-4xl mx-auto' : 'text-sm'}`} />}
-                  placeholder={<div className="absolute top-4 left-4 text-gray-400 pointer-events-none">Enter report...</div>}
-                  ErrorBoundary={LexicalErrorBoundary}
+
+          {/* 1. REPORT VIEW (Lexical) - Kept mounted, hidden via CSS if notes or transcript is active */}
+          <div className={`flex-1 flex flex-col h-full min-h-0 ${viewMode === 'report' ? '' : 'hidden'}`}>
+            <LexicalComposer initialConfig={initialConfig}>
+              <div
+                ref={editorContainerRef}
+                className="h-full w-full relative flex flex-col flex-1"
+                onKeyDown={(e) => e.stopPropagation()}
+                onKeyUp={(e) => e.stopPropagation()}
+                onKeyPress={(e) => e.stopPropagation()}
+              >
+                <ToolbarPlugin
+                  isExpanded={isExpanded}
+                  studyUid={studyUid}
+                  erpRefId={erpRefId}
+                  department={departmentId}
+                  testType={testId}
+                  resolvedVisitId={resolvedVisitId}
+                  onTranscriptChange={handleTranscriptChange}
+                  onNotesChange={handleNotesChange}
+                  onRecordingChange={handleRecordingChange}
                 />
+                <div className="flex-1 relative overflow-y-auto bg-white text-black">
+                  <RichTextPlugin
+                    contentEditable={<ContentEditable className={`h-full w-full outline-none resize-none p-4 ${isExpanded ? 'text-lg leading-relaxed max-w-4xl mx-auto' : 'text-sm'}`} />}
+                    placeholder={<div className="absolute top-4 left-4 text-gray-400 pointer-events-none">Enter report...</div>}
+                    ErrorBoundary={LexicalErrorBoundary}
+                  />
+                </div>
+                <ListPlugin />
+                <TablePlugin />
+                <HistoryPlugin />
+                <OnChangePlugin onChange={handleEditorChange} />
+                <InitialStatePlugin content={draftContent} studyUid={studyUid} prefillContent={prefillContent} />
+                <MeasurementInjectionPlugin />
+                <TextInjectionPlugin />
+                <SubmitReportPlugin studyUid={studyUid} transcriptRef={transcriptRef} aiNotesRef={aiNotesRef} />
               </div>
-              <ListPlugin />
-              <TablePlugin />
-              <HistoryPlugin />
-              <OnChangePlugin onChange={handleEditorChange} />
-              <InitialStatePlugin content={draftContent} studyUid={studyUid} prefillContent={prefillContent} />
-              <MeasurementInjectionPlugin />
-              <SubmitReportPlugin studyUid={studyUid} />
+            </LexicalComposer>
+          </div>
+
+          {/* 2. AI CLINICAL NOTES VIEW */}
+          {viewMode === 'notes' && (
+            <div className={`flex-1 flex flex-col min-h-0 ${isExpanded ? 'p-6 bg-gray-50 text-gray-900' : 'p-3 bg-secondary-dark text-white'} overflow-hidden gap-3`}>
+              <div className="flex justify-between items-center pb-2 border-b border-gray-400/20 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">📝 AI Clinical Notes</span>
+                  {aiNotes && (
+                    <span className="text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded font-mono">
+                      Live AI Synced
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!aiNotes) return;
+                      window.dispatchEvent(new CustomEvent('actecal:insertTextToReport', { detail: { text: `\n--- AI Clinical Notes ---\n${aiNotes}\n` } }));
+                      setViewMode('report');
+                    }}
+                    disabled={!aiNotes}
+                    className="text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded shadow-sm disabled:opacity-40 transition-colors"
+                    title="Insert these notes into the main report editor"
+                  >
+                    ➕ Insert to Report
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!aiNotes) return;
+                      navigator.clipboard.writeText(aiNotes);
+                    }}
+                    disabled={!aiNotes}
+                    className="text-xs px-2 py-1 bg-secondary-main hover:bg-primary-main rounded border border-secondary-light disabled:opacity-40 transition-colors text-white"
+                    title="Copy notes to clipboard"
+                  >
+                    📋 Copy
+                  </button>
+                </div>
+              </div>
+              <div className={`flex-1 overflow-y-auto rounded p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap ${
+                isExpanded ? 'bg-white border border-gray-200 text-gray-800' : 'bg-primary-dark/60 border border-secondary-light/40 text-gray-200'
+              }`}>
+                {aiNotes ? (
+                  aiNotes
+                ) : (
+                  <div className="text-gray-400 italic text-center py-12 font-sans">
+                    No AI clinical notes generated yet.<br />
+                    Notes will summarize automatically from speech as you record doctor-patient audio.
+                  </div>
+                )}
+              </div>
             </div>
-          </LexicalComposer>
+          )}
+
+          {/* 3. LIVE TRANSCRIPT VIEW */}
+          {viewMode === 'transcript' && (
+            <div className={`flex-1 flex flex-col min-h-0 ${isExpanded ? 'p-6 bg-gray-50 text-gray-900' : 'p-3 bg-secondary-dark text-white'} overflow-hidden gap-3`}>
+              <div className="flex justify-between items-center pb-2 border-b border-gray-400/20 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">🎙️ Speech-to-Text Transcript</span>
+                  {isScribeRecording && (
+                    <span className="flex items-center gap-1.5 text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded animate-pulse font-mono font-bold">
+                      <span className="w-2 h-2 rounded-full bg-red-500"></span> LISTENING
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!liveTranscript) return;
+                      window.dispatchEvent(new CustomEvent('actecal:insertTextToReport', { detail: { text: `\n--- Speech Transcript ---\n${liveTranscript}\n` } }));
+                      setViewMode('report');
+                    }}
+                    disabled={!liveTranscript}
+                    className="text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded shadow-sm disabled:opacity-40 transition-colors"
+                    title="Insert transcript into the main report editor"
+                  >
+                    ➕ Insert to Report
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!liveTranscript) return;
+                      navigator.clipboard.writeText(liveTranscript);
+                    }}
+                    disabled={!liveTranscript}
+                    className="text-xs px-2 py-1 bg-secondary-main hover:bg-primary-main rounded border border-secondary-light disabled:opacity-40 transition-colors text-white"
+                    title="Copy transcript to clipboard"
+                  >
+                    📋 Copy
+                  </button>
+                </div>
+              </div>
+              <div className={`flex-1 overflow-y-auto rounded p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap ${
+                isExpanded ? 'bg-white border border-gray-200 text-gray-800' : 'bg-primary-dark/60 border border-secondary-light/40 text-gray-200'
+              }`}>
+                {liveTranscript ? (
+                  liveTranscript
+                ) : (
+                  <div className="text-gray-400 italic text-center py-12">
+                    Speech transcript will stream here in real-time as you speak into the microphone.
+                  </div>
+                )}
+              </div>
+              {liveTranscript && (
+                <div className="text-[11px] text-gray-400 flex justify-between px-1 shrink-0">
+                  <span>Characters: {liveTranscript.length}</span>
+                  <span>Words: {liveTranscript.trim().split(/\s+/).filter(Boolean).length}</span>
+                </div>
+              )}
+            </div>
+          )}
           {isExpanded ? (
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end shrink-0">
                <button
