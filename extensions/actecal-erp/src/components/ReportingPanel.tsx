@@ -462,6 +462,12 @@ function ToolbarPlugin({
   // Forward ref for flushing accumulated chunks to GCS in fallback mode
   const flushAccumulatedChunksToGcsRef = useRef<() => Promise<void>>(async () => {});
 
+  // Fallback mode state: when GPU WebSocket is healthy, audio chunks are kept in memory
+  // and NOT uploaded to GCS (to avoid firing Pub/Sub webhooks that spin up Cloud Run and incur costs).
+  // Chunks are ONLY uploaded to GCS if WebSocket fails or goes down (fallback mode).
+  // Declared before useClinicalScribe/the render body reads it (TDZ otherwise).
+  const isFallbackActiveRef = useRef<boolean>(false);
+
   const {
     startScribeSync,
     finalizeConsultation,
@@ -620,7 +626,6 @@ function ToolbarPlugin({
   // Fallback mode state: when GPU WebSocket is healthy, audio chunks are kept in memory
   // and NOT uploaded to GCS (to avoid firing Pub/Sub webhooks that spin up Cloud Run and incur costs).
   // Chunks are ONLY uploaded to GCS if WebSocket fails or goes down (fallback mode).
-  const isFallbackActiveRef = useRef<boolean>(false);
   const lastUploadedChunkIndexRef = useRef<number>(0);
   const isFlushingChunksRef = useRef<boolean>(false);
 

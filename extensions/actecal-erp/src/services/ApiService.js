@@ -39,17 +39,13 @@ const TENANT_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/i;
 //   return window.config?.tenant;
 // };
 
-
 const getTenant = () => {
   // 1. Get tenant from current URL hostname
   try {
     const hostname = window.location.hostname;
     const subdomain = hostname.split('.')[0];
 
-    if (
-      hostname.endsWith('.spectra.actecal.com') &&
-      TENANT_PATTERN.test(subdomain)
-    ) {
+    if (hostname.endsWith('.spectra.actecal.com') && TENANT_PATTERN.test(subdomain)) {
       return subdomain;
     }
   } catch (err) {
@@ -518,9 +514,7 @@ const authFetch = async (url, options = {}) => {
     requestOptions.headers = {
       ...(requestOptions.headers || {}),
       ...(!requestOptions.headers?.Authorization ? { Authorization: `Bearer ${guestToken}` } : {}),
-      ...(guestPermToken
-        ? { 'x-perm': guestPermToken }
-        : {}),
+      ...(guestPermToken ? { 'x-perm': guestPermToken } : {}),
     };
   } else if (guestPermToken) {
     requestOptions.headers = {
@@ -683,7 +677,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
         'x-user-id': this.userId,
-        'x-session-id': TAB_SESSION_ID,
+        // 'x-session-id': TAB_SESSION_ID,
       },
       body: JSON.stringify(measurementData),
     });
@@ -802,7 +796,14 @@ class ApiService {
     );
   }
 
-  async submitReportViaERP({ studyInstanceUid, template, pdfBase64, reportType, transcript, aiNotes }) {
+  async submitReportViaERP({
+    studyInstanceUid,
+    template,
+    pdfBase64,
+    reportType,
+    transcript,
+    aiNotes,
+  }) {
     return authFetch(`${this.baseUrl}/submit-report-erp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

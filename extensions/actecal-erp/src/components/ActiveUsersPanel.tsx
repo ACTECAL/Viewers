@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import IoTService from '../services/IoTService';
+// IoT disabled: AWS IoT WebSocket kept failing, realtime sync turned off.
+// import IoTService from '../services/IoTService';
 import { useSystem } from '@ohif/core';
 
 function ActiveUsersPanel() {
@@ -32,7 +33,7 @@ function ActiveUsersPanel() {
     if (!studyUid) return;
 
     // Connect to IoT Core to join this specific study's "room"
-    IoTService.connect(studyUid);
+    // IoTService.connect(studyUid);
 
     // Subscribe to presence updates
     const handlePresenceUpdate = (event) => {
@@ -43,7 +44,7 @@ function ActiveUsersPanel() {
 
     return () => {
       window.removeEventListener('ACTECAL_PRESENCE_UPDATE', handlePresenceUpdate);
-      IoTService.disconnect(); // Disconnect when component unmounts
+      // IoTService.disconnect(); // Disconnect when component unmounts
     };
   }, [studyUid]);
 

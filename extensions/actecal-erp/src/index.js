@@ -172,13 +172,10 @@ import React from 'react';
 
 // export { getCommandsModule, getToolbarModule };
 
-
-
 import ApiService, { TAB_SESSION_ID } from './services/ApiService';
-import IoTService from './services/IoTService';
-import {
-  MeasurementService,
-} from '@ohif/core';
+// IoT disabled: AWS IoT WebSocket kept failing, realtime sync turned off.
+// import IoTService from './services/IoTService';
+import { MeasurementService } from '@ohif/core';
 
 import {
   EXTRA_MEASUREMENT_KEYS,
@@ -186,10 +183,7 @@ import {
   resolveImageReference,
 } from './utils/measurementHydrator';
 
-import {
-  applyRemoteMeasurement,
-  isApplyingRemoteChange,
-} from './utils/remoteMeasurementApplier';
+import { applyRemoteMeasurement, isApplyingRemoteChange } from './utils/remoteMeasurementApplier';
 
 import { parse } from 'query-string';
 
@@ -201,21 +195,26 @@ const extensionId = '@ohif/extension-actecal-erp';
    STUDY INITIALIZATION
 ---------------------------- */
 
-async function initializeStudy(extensionManager, servicesManager, measurementService, measurementSource, toMeasurementSchema) {
-
+async function initializeStudy(
+  extensionManager,
+  servicesManager,
+  measurementService,
+  measurementSource,
+  toMeasurementSchema
+) {
   try {
     const { uiNotificationService } = servicesManager.services;
-    console.log("initializeStudy called");
+    console.log('initializeStudy called');
 
     const queryParams = parse(window.location.search);
 
-    console.log("Query Params:", queryParams);
+    console.log('Query Params:', queryParams);
 
     const userId = queryParams.userId;
     const tenant = queryParams.tenant;
 
-    console.log("USER ID:", userId);
-    console.log("TENANT:", tenant);
+    console.log('USER ID:', userId);
+    console.log('TENANT:', tenant);
 
     const apiService = new ApiService(userId);
     let studyInstanceUids = [];
@@ -249,7 +248,7 @@ async function initializeStudy(extensionManager, servicesManager, measurementSer
           type: 'error',
           duration: 10000,
         });
-        console.error("Share code resolution failed:", err);
+        console.error('Share code resolution failed:', err);
         return;
       }
     } else {
@@ -258,7 +257,7 @@ async function initializeStudy(extensionManager, servicesManager, measurementSer
         (queryParams.StudyInstanceUID ? [queryParams.StudyInstanceUID] : []);
 
       if (!studyInstanceUids.length) {
-        console.log("No StudyInstanceUIDs found - showing default view");
+        console.log('No StudyInstanceUIDs found - showing default view');
         return;
       }
 
@@ -272,23 +271,30 @@ async function initializeStudy(extensionManager, servicesManager, measurementSer
           if (parsedCache.token && parsedCache.dicomStorePath) {
             // Check if token has expired (with a 1-minute safety buffer)
             if (!parsedCache.expiresAt || Date.now() < parsedCache.expiresAt - 60000) {
-              console.log("🚀 Cache Hit! Bypassing API fetch for StudyContext & Token");
-              contexts = { studies: [{ dicom_store_path: parsedCache.dicomStorePath, study_instance_uid: studyInstanceUids[0] }] };
+              console.log('🚀 Cache Hit! Bypassing API fetch for StudyContext & Token');
+              contexts = {
+                studies: [
+                  {
+                    dicom_store_path: parsedCache.dicomStorePath,
+                    study_instance_uid: studyInstanceUids[0],
+                  },
+                ],
+              };
               tokenData = { access_token: parsedCache.token };
             } else {
-              console.log("⚠️ Cached token is expired. Will fetch a new one from API.");
+              console.log('⚠️ Cached token is expired. Will fetch a new one from API.');
               sessionStorage.removeItem(cacheKey);
             }
           }
         } catch (e) {
-          console.warn("Error parsing cached Worklist data", e);
+          console.warn('Error parsing cached Worklist data', e);
         }
       }
 
       // Fallback to API if cache missed
       if (!contexts || !tokenData) {
         try {
-          console.log("Cache Miss. Fetching Context and Token via API");
+          console.log('Cache Miss. Fetching Context and Token via API');
           const results = await Promise.all([
             apiService.fetchStudyContext(studyInstanceUids),
             apiService.getGCPToken(studyInstanceUids),
@@ -297,7 +303,7 @@ async function initializeStudy(extensionManager, servicesManager, measurementSer
           tokenData = results[1];
 
           if (!tokenData || !tokenData.access_token) {
-            throw new Error("Invalid token received from backend");
+            throw new Error('Invalid token received from backend');
           }
         } catch (authErr) {
           uiNotificationService.show({
@@ -306,215 +312,196 @@ async function initializeStudy(extensionManager, servicesManager, measurementSer
             type: 'error',
             duration: 10000,
           });
-          console.error("Token fetch failed:", authErr);
+          console.error('Token fetch failed:', authErr);
           return;
         }
       }
     }
 
-      /* ---------------------------
+    /* ---------------------------
    CONFIGURE DATA SOURCE
 ---------------------------- */
 
-
-/* ---------------------------
+    /* ---------------------------
    CONFIGURE DATA SOURCE
 ---------------------------- */
 
-try {
-  let dicomStorePath;
-  let validUids = [...studyInstanceUids];
+    try {
+      let dicomStorePath;
+      let validUids = [...studyInstanceUids];
 
-  if (contexts && contexts.studies && Array.isArray(contexts.studies) && contexts.studies.length > 0) {
-    // Extract primary datastore from the first study
-    dicomStorePath = contexts.studies[0].dicom_store_path;
+      if (
+        contexts &&
+        contexts.studies &&
+        Array.isArray(contexts.studies) &&
+        contexts.studies.length > 0
+      ) {
+        // Extract primary datastore from the first study
+        dicomStorePath = contexts.studies[0].dicom_store_path;
 
-    // Check if any studies belong to a different datastore
-    const mismatchedStudies = contexts.studies.filter(s => s.dicom_store_path !== dicomStorePath);
+        // Check if any studies belong to a different datastore
+        const mismatchedStudies = contexts.studies.filter(
+          s => s.dicom_store_path !== dicomStorePath
+        );
 
-    if (mismatchedStudies.length > 0) {
-      const mismatchedUids = mismatchedStudies.map(s => s.study_instance_uid);
-      const matchedStudies = contexts.studies.filter(s => s.dicom_store_path === dicomStorePath);
-      validUids = matchedStudies.map(s => s.study_instance_uid);
+        if (mismatchedStudies.length > 0) {
+          const mismatchedUids = mismatchedStudies.map(s => s.study_instance_uid);
+          const matchedStudies = contexts.studies.filter(
+            s => s.dicom_store_path === dicomStorePath
+          );
+          validUids = matchedStudies.map(s => s.study_instance_uid);
 
-      // Update the browser URL immediately so OHIF core only loads the valid UIDs
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.has('StudyInstanceUIDs')) {
-        urlParams.set('StudyInstanceUIDs', validUids.join(','));
-      }
-      if (urlParams.has('StudyInstanceUID')) {
-        urlParams.delete('StudyInstanceUID'); // Clean up singular param if we are using multiples
-        urlParams.set('StudyInstanceUIDs', validUids.join(','));
-      }
-      const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
-      window.history.replaceState(null, '', newUrl);
-
-      // Generate a URL for the remaining mismatched studies
-      const newTabParams = new URLSearchParams(window.location.search);
-      newTabParams.delete('StudyInstanceUID');
-      newTabParams.set('StudyInstanceUIDs', mismatchedUids.join(','));
-      const newTabUrl = `${window.location.pathname}?${newTabParams.toString()}`;
-
-      // Show toast notifying user
-      const { uiNotificationService } = servicesManager.services;
-      uiNotificationService.show({
-        title: 'Additional Studies Available',
-        message: `Requested study cannot be opened in same view. Please click below to open in another tab.`,
-        type: 'warning',
-        duration: 15000,
-        action: {
-          label: 'Open Remaining in New Tab',
-          onClick: () => {
-            window.open(newTabUrl, '_blank');
+          // Update the browser URL immediately so OHIF core only loads the valid UIDs
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.has('StudyInstanceUIDs')) {
+            urlParams.set('StudyInstanceUIDs', validUids.join(','));
           }
+          if (urlParams.has('StudyInstanceUID')) {
+            urlParams.delete('StudyInstanceUID'); // Clean up singular param if we are using multiples
+            urlParams.set('StudyInstanceUIDs', validUids.join(','));
+          }
+          const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+          window.history.replaceState(null, '', newUrl);
+
+          // Generate a URL for the remaining mismatched studies
+          const newTabParams = new URLSearchParams(window.location.search);
+          newTabParams.delete('StudyInstanceUID');
+          newTabParams.set('StudyInstanceUIDs', mismatchedUids.join(','));
+          const newTabUrl = `${window.location.pathname}?${newTabParams.toString()}`;
+
+          // Show toast notifying user
+          const { uiNotificationService } = servicesManager.services;
+          uiNotificationService.show({
+            title: 'Additional Studies Available',
+            message: `Requested study cannot be opened in same view. Please click below to open in another tab.`,
+            type: 'warning',
+            duration: 15000,
+            action: {
+              label: 'Open Remaining in New Tab',
+              onClick: () => {
+                window.open(newTabUrl, '_blank');
+              },
+            },
+          });
         }
-      });
-    }
-  } else {
-    // Fallback to older API response format if the backend hasn't updated yet
-    dicomStorePath = contexts.dicomStorePath;
-  }
-
-  console.log("dicomStorePath:", dicomStorePath);
-
-  const gcpUrl = `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
-  console.log("GCP URL:", gcpUrl);
-
-  const { userAuthenticationService } = servicesManager.services;
-
-  // Inject the Google Cloud token into OHIF's authentication service
-  if (userAuthenticationService) {
-    userAuthenticationService.setServiceImplementation({
-      getAuthorizationHeader: () => ({
-        Authorization: `Bearer ${tokenData.access_token}`
-      })
-    });
-    console.log("✅ Set Authorization header in userAuthenticationService");
-  } else {
-    console.warn("userAuthenticationService not available");
-  }
-
-  if (extensionManager) {
-    const existingSource = extensionManager.dataSourceDefs["ohif"];
-    const existingConfig = existingSource ? existingSource.configuration : {};
-
-    extensionManager.updateDataSourceConfiguration(
-      "ohif",
-      {
-        ...existingConfig,
-        wadoUriRoot: gcpUrl,
-        qidoRoot: gcpUrl,
-        wadoRoot: gcpUrl,
-        imageRendering: 'wadors',
-        thumbnailRendering: 'wadors',
-        enableStudyLazyLoad: true,
-        supportsFuzzyMatching: false,
-        supportsWildcard: true,
-        dicomUploadEnabled: true,
-        omitQuotationForMultipartRequest: true,
+      } else {
+        // Fallback to older API response format if the backend hasn't updated yet
+        dicomStorePath = contexts.dicomStorePath;
       }
-    );
 
-    console.log("✅ Datasource updated successfully using extensionManager");
-  }
+      console.log('dicomStorePath:', dicomStorePath);
 
-} catch (error) {
-  console.error("Datasource configuration failed:", error);
-}
+      const gcpUrl = `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
+      console.log('GCP URL:', gcpUrl);
 
-// try {
+      const { userAuthenticationService } = servicesManager.services;
 
-//   const { dicomStorePath } = contexts;
-//    console.log("dicomStorePath",dicomStorePath)
-//   const gcpUrl =
-//     `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
+      // Inject the Google Cloud token into OHIF's authentication service
+      if (userAuthenticationService) {
+        userAuthenticationService.setServiceImplementation({
+          getAuthorizationHeader: () => ({
+            Authorization: `Bearer ${tokenData.access_token}`,
+          }),
+        });
+        console.log('✅ Set Authorization header in userAuthenticationService');
+      } else {
+        console.warn('userAuthenticationService not available');
+      }
 
-//   console.log("GCP URL:", gcpUrl);
+      if (extensionManager) {
+        const existingSource = extensionManager.dataSourceDefs['ohif'];
+        const existingConfig = existingSource ? existingSource.configuration : {};
 
-//   const activeDataSource =
-//     extensionManager?.getActiveDataSource?.();
+        extensionManager.updateDataSourceConfiguration('ohif', {
+          ...existingConfig,
+          wadoUriRoot: gcpUrl,
+          qidoRoot: gcpUrl,
+          wadoRoot: gcpUrl,
+          imageRendering: 'wadors',
+          thumbnailRendering: 'wadors',
+          enableStudyLazyLoad: true,
+          supportsFuzzyMatching: false,
+          supportsWildcard: true,
+          dicomUploadEnabled: true,
+          omitQuotationForMultipartRequest: true,
+        });
 
-//   console.log(
-//     "Active Data Source:",
-//     activeDataSource
-//   );
+        console.log('✅ Datasource updated successfully using extensionManager');
+      }
+    } catch (error) {
+      console.error('Datasource configuration failed:', error);
+    }
 
-//   if (activeDataSource?.[0]) {
+    // try {
 
-//     activeDataSource[0]
-//       .updateDataSourceConfiguration({
-//         wadoUriRoot: gcpUrl,
-//         qidoRoot: gcpUrl,
-//         wadoRoot: gcpUrl,
-//         headers: {
-//           Authorization: `Bearer ${tokenData.access_token}`,
-//         },
-//       });
+    //   const { dicomStorePath } = contexts;
+    //    console.log("dicomStorePath",dicomStorePath)
+    //   const gcpUrl =
+    //     `https://healthcare.googleapis.com/v1/${dicomStorePath}/dicomWeb`;
 
-//     console.log(
-//       "Datasource updated successfully"
-//     );
+    //   console.log("GCP URL:", gcpUrl);
 
-//   } else {
+    //   const activeDataSource =
+    //     extensionManager?.getActiveDataSource?.();
 
-//     console.warn(
-//       "No active datasource found"
-//     );
+    //   console.log(
+    //     "Active Data Source:",
+    //     activeDataSource
+    //   );
 
-//   }
+    //   if (activeDataSource?.[0]) {
 
-// } catch (error) {
+    //     activeDataSource[0]
+    //       .updateDataSourceConfiguration({
+    //         wadoUriRoot: gcpUrl,
+    //         qidoRoot: gcpUrl,
+    //         wadoRoot: gcpUrl,
+    //         headers: {
+    //           Authorization: `Bearer ${tokenData.access_token}`,
+    //         },
+    //       });
 
-//   console.error(
-//     "Datasource configuration failed:",
-//     error
-//   );
+    //     console.log(
+    //       "Datasource updated successfully"
+    //     );
 
-// }
+    //   } else {
 
-    console.log(
-      "Study Context:",
-      contexts
-    );
+    //     console.warn(
+    //       "No active datasource found"
+    //     );
 
-    console.log(
-      "Token Data:",
-      tokenData
-    );
+    //   }
 
+    // } catch (error) {
 
+    //   console.error(
+    //     "Datasource configuration failed:",
+    //     error
+    //   );
+
+    // }
+
+    console.log('Study Context:', contexts);
+
+    console.log('Token Data:', tokenData);
 
     /* ---------------------------
        MEASUREMENTS NOW LOADED DYNAMICALLY
        via displaySetService in preRegistration
     ---------------------------- */
-
   } catch (err) {
-
-    console.error(
-      "Study initialization failed:",
-      err
-    );
-
+    console.error('Study initialization failed:', err);
   }
-
 }
-
-
 
 /* ---------------------------
    EXTENSION REGISTER
 ---------------------------- */
 
 // function preRegistration(extensionManager) {
-async function preRegistration({  extensionManager,
-  servicesManager,
-  commandsManager,}) {
-
-
-  console.log(
-    "Actecal extension loaded"
-  );
+async function preRegistration({ extensionManager, servicesManager, commandsManager }) {
+  console.log('Actecal extension loaded');
 
   const { measurementService } = servicesManager.services;
 
@@ -527,17 +514,12 @@ async function preRegistration({  extensionManager,
     measurementService.addMeasurementSchemaKeys(EXTRA_MEASUREMENT_KEYS);
   }
 
-  const measurementSource =
-    measurementService.createSource(
-      'actecal-erp',
-      '1'
-    );
+  const measurementSource = measurementService.createSource('actecal-erp', '1');
 
-  const toMeasurementSchema =
-    data => ({
-      ...data,
-      source: measurementSource,
-    });
+  const toMeasurementSchema = data => ({
+    ...data,
+    source: measurementSource,
+  });
 
   const queryParams = parse(window.location.search);
   const apiService = new ApiService(queryParams.userId);
@@ -545,7 +527,13 @@ async function preRegistration({  extensionManager,
   // Initialize viewer
   // initializeStudy(extensionManager);
 
-  await initializeStudy(extensionManager, servicesManager, measurementService, measurementSource, toMeasurementSchema);
+  await initializeStudy(
+    extensionManager,
+    servicesManager,
+    measurementService,
+    measurementSource,
+    toMeasurementSchema
+  );
 
   // Hook into display set loading to dynamically fetch measurements when navigating via Single Page App routing
   const { displaySetService, cornerstoneViewportService } = servicesManager.services;
@@ -566,7 +554,8 @@ async function preRegistration({  extensionManager,
   const HYDRATION_SAVE_GRACE_MS = 3000;
   const hydratedAt = {};
 
-  const isReplaying = uid => isHydrating || (uid != null && Date.now() - (hydratedAt[uid] || 0) < HYDRATION_SAVE_GRACE_MS);
+  const isReplaying = uid =>
+    isHydrating || (uid != null && Date.now() - (hydratedAt[uid] || 0) < HYDRATION_SAVE_GRACE_MS);
 
   const hydrateStudyMeasurements = async studyUid => {
     console.log(`Loading measurements dynamically for study: ${studyUid}`);
@@ -622,9 +611,9 @@ async function preRegistration({  extensionManager,
       // A session can carry several studies (StudyInstanceUIDs=A,B), and one
       // DISPLAY_SETS_ADDED batch can mix studies, so hydrate every study in the
       // batch rather than just displaySetsAdded[0].
-      const studyUids = [...new Set(
-        displaySetsAdded.map(ds => ds?.StudyInstanceUID).filter(Boolean)
-      )].filter(studyUid => !loadedStudiesForMeasurements.has(studyUid));
+      const studyUids = [
+        ...new Set(displaySetsAdded.map(ds => ds?.StudyInstanceUID).filter(Boolean)),
+      ].filter(studyUid => !loadedStudiesForMeasurements.has(studyUid));
 
       if (!studyUids.length) return;
       studyUids.forEach(studyUid => {
@@ -632,7 +621,7 @@ async function preRegistration({  extensionManager,
         // Join this study's realtime MQTT room (erp/study/<uid>/updates).
         // IoTService ref-counts connect/disconnect so ActiveUsersPanel
         // mounting cannot tear down the session-level subscription.
-        IoTService.connect(studyUid);
+        // IoTService.connect(studyUid);
       });
 
       const previousHydrating = isHydrating;
@@ -659,7 +648,7 @@ async function preRegistration({  extensionManager,
 
   // Realtime measurement changes published by other doctors
   // (erp-api → AWS IoT → IoTService). ADD, UPDATE and DELETE all arrive here.
-  window.addEventListener('actecal:externalMeasurement', (event) => {
+  window.addEventListener('actecal:externalMeasurement', event => {
     const message = event.detail;
     const measurement = message?.measurement;
 
@@ -727,10 +716,6 @@ async function preRegistration({  extensionManager,
     // subscriber below already fires (inside the remote-apply window) and
     // dispatches it - a second dispatch would append a duplicate paragraph.
   });
-
-
-
-
 
   /* ---------------------------
      MEASUREMENT EVENTS
@@ -801,13 +786,13 @@ async function preRegistration({  extensionManager,
       // A replayed row is already persisted, so don't write it back - and the
       // same goes for a change applied from another doctor's MQTT message.
       if (!isReplaying(measurement.uid) && !isApplyingRemoteChange()) {
-        console.log("MEASUREMENT_ADDED:", event);
+        console.log('MEASUREMENT_ADDED:', event);
         debouncedSaveMeasurement(studyUid, measurement, 'ADD');
       }
 
       // Dispatch custom event to inject into Lexical
       const customEvent = new CustomEvent('actecal:injectMeasurement', {
-         detail: { measurement }
+        detail: { measurement },
       });
       window.dispatchEvent(customEvent);
     }
@@ -825,7 +810,8 @@ async function preRegistration({  extensionManager,
   });
 
   measurementService.subscribe(measurementService.EVENTS.MEASUREMENT_REMOVED, event => {
-    const annotationUID = typeof event.measurement === 'string' ? event.measurement : event.measurement?.uid;
+    const annotationUID =
+      typeof event.measurement === 'string' ? event.measurement : event.measurement?.uid;
     if (annotationUID) {
       const studyUid = measurementStudyMap[annotationUID];
       if (studyUid) {
@@ -834,18 +820,16 @@ async function preRegistration({  extensionManager,
         // delete is already persisted by the doctor who made it - writing it
         // again would echo back over MQTT.
         if (!isApplyingRemoteChange()) {
-          console.log("MEASUREMENT_REMOVED:", event);
-          apiService.saveMeasurement(studyUid, { uid: annotationUID, eventType: 'DELETE' }).catch(e => console.error('Delete failed', e));
+          console.log('MEASUREMENT_REMOVED:', event);
+          apiService
+            .saveMeasurement(studyUid, { uid: annotationUID, eventType: 'DELETE' })
+            .catch(e => console.error('Delete failed', e));
         }
         delete measurementStudyMap[annotationUID];
       }
     }
   });
-
-
 }
-
-
 
 /* ---------------------------
    COMMANDS & TOOLBAR
@@ -872,30 +856,30 @@ function getCommandsModule({ servicesManager }) {
         containerClassName: 'max-w-lg',
       });
     },
-    toggleFullscreen: (context) => {
-      console.log("===================F key===================");
+    toggleFullscreen: context => {
+      console.log('===================F key===================');
       const { panelService } = servicesManager.services;
       const isFullscreen = !!document.fullscreenElement;
 
       // --- ACTECAL DEBUG START ---
       const activeEl = document.activeElement;
-      const isEditorFocused = activeEl && (
-        activeEl.isContentEditable ||
-        (activeEl.closest && activeEl.closest('.editor-input')) ||
-        (activeEl.closest && activeEl.closest('[contenteditable="true"]'))
-      );
+      const isEditorFocused =
+        activeEl &&
+        (activeEl.isContentEditable ||
+          (activeEl.closest && activeEl.closest('.editor-input')) ||
+          (activeEl.closest && activeEl.closest('[contenteditable="true"]')));
 
-      console.log("======================================");
-      console.log("toggleFullscreen command triggered!");
-      console.log("Active Element:", activeEl);
-      console.log("Tag Name:", activeEl?.tagName);
-      console.log("Classes:", activeEl?.className);
-      console.log("isContentEditable:", activeEl?.isContentEditable);
-      console.log("isEditorFocused check:", isEditorFocused);
-      console.log("======================================");
+      console.log('======================================');
+      console.log('toggleFullscreen command triggered!');
+      console.log('Active Element:', activeEl);
+      console.log('Tag Name:', activeEl?.tagName);
+      console.log('Classes:', activeEl?.className);
+      console.log('isContentEditable:', activeEl?.isContentEditable);
+      console.log('isEditorFocused check:', isEditorFocused);
+      console.log('======================================');
 
       if (isEditorFocused) {
-        console.log("Editor is focused! Preventing fullscreen toggle.");
+        console.log('Editor is focused! Preventing fullscreen toggle.');
         return;
       }
       // --- ACTECAL DEBUG END ---
@@ -913,14 +897,15 @@ function getCommandsModule({ servicesManager }) {
           if (uiNotificationService) {
             uiNotificationService.show({
               title: 'Fullscreen Not Supported',
-              message: 'Your browser or device (e.g., iOS Safari) does not support the Fullscreen API.',
+              message:
+                'Your browser or device (e.g., iOS Safari) does not support the Fullscreen API.',
               type: 'info',
               duration: 3000,
             });
           }
         }
         panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
-          options: { leftPanelClosed: true, rightPanelClosed: true }
+          options: { leftPanelClosed: true, rightPanelClosed: true },
         });
       } else {
         if (document.exitFullscreen) {
@@ -929,7 +914,7 @@ function getCommandsModule({ servicesManager }) {
           document.webkitExitFullscreen();
         }
         panelService._broadcastEvent(panelService.EVENTS.PANELS_CHANGED, {
-          options: { leftPanelClosed: false, rightPanelClosed: false }
+          options: { leftPanelClosed: false, rightPanelClosed: false },
         });
       }
     },
@@ -940,10 +925,14 @@ function getCommandsModule({ servicesManager }) {
     defaultContext: 'VIEWER',
     definitions: {
       openShareModal: {
-        commandFn: function(context) { return actions.openShareModal(context); },
+        commandFn: function (context) {
+          return actions.openShareModal(context);
+        },
       },
       toggleFullscreen: {
-        commandFn: function(context) { return actions.toggleFullscreen(context); },
+        commandFn: function (context) {
+          return actions.toggleFullscreen(context);
+        },
       },
     },
   };
@@ -973,7 +962,6 @@ function getToolbarModule({ commandsManager }) {
     },
   ];
 }
-
 
 import ReportingPanel from './components/ReportingPanel';
 import AIAnalysisPanel from './components/AIAnalysisPanel';
@@ -1036,13 +1024,11 @@ import getDataSourcesModule from './getDataSourcesModule';
 ---------------------------- */
 
 export default {
-
-  id:
-    extensionId,
+  id: extensionId,
 
   preRegistration,
   getCommandsModule,
   getToolbarModule,
   getPanelModule,
-  getDataSourcesModule
+  getDataSourcesModule,
 };
