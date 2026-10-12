@@ -495,8 +495,8 @@ function ToolbarPlugin({
   } = useClinicalScribe({
     tenantName,
     visitId: finalVisitId,
-    department: department || 'general',
-    testType: testType || 'consultation',
+    department: department || 'radiology',
+    testType: testType || 'radiodiagnosis',
     editorInstanceRef,
     onLexicalApplied: handleLexicalApplied,
     onFallbackActivated: () => {
