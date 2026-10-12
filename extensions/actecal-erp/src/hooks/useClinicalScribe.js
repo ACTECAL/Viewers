@@ -398,7 +398,7 @@ export const useClinicalScribe = ({
   const syncLexical = useCallback(
     async (lexicalState) => {
       if (ScribeSocketService.isOpen() && lexicalState) {
-        console.log('[scribe] Sending sync_lexical to GPU server');
+        console.log('[ScribeState] Sending sync_lexical to GPU server');
         ScribeSocketService.send({
           action: 'sync_lexical',
           lexical: lexicalState,
@@ -407,6 +407,14 @@ export const useClinicalScribe = ({
     },
     [],
   );
+
+  const flushAudioBuffer = useCallback(() => {
+    if (ScribeSocketService.isOpen()) {
+      console.log(`[ScribeState] Sending flush to GPU server for visitId=${visitIdRef.current}`);
+      return ScribeSocketService.flush();
+    }
+    return false;
+  }, []);
 
   const finalizeConsultation = useCallback(
     async ({ applyLexical = true } = {}) => {
@@ -538,6 +546,7 @@ export const useClinicalScribe = ({
     stopScribeSync,
     resetSession,
     syncLexical,
+    flushAudioBuffer,
     finalizeConsultation,
     updateLexicalEditor,
   };
