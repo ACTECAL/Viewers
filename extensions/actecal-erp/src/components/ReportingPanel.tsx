@@ -461,6 +461,7 @@ function ToolbarPlugin({
 
   // Forward ref for flushing accumulated chunks to GCS in fallback mode
   const flushAccumulatedChunksToGcsRef = useRef<() => Promise<void>>(async () => {});
+  const isFallbackActiveRef = useRef<boolean>(false);
 
   // Fallback mode state: when GPU WebSocket is healthy, audio chunks are kept in memory
   // and NOT uploaded to GCS (to avoid firing Pub/Sub webhooks that spin up Cloud Run and incur costs).
@@ -471,6 +472,8 @@ function ToolbarPlugin({
   const {
     startScribeSync,
     finalizeConsultation,
+    resetSession,
+    syncLexical,
     reportStatus,
     transport,
     serverHealth,
@@ -552,6 +555,10 @@ function ToolbarPlugin({
   startScribeSyncRef.current = startScribeSync;
   const finalizeConsultationRef = useRef(finalizeConsultation);
   finalizeConsultationRef.current = finalizeConsultation;
+  const resetSessionRef = useRef(resetSession);
+  resetSessionRef.current = resetSession;
+  const syncLexicalRef = useRef(syncLexical);
+  syncLexicalRef.current = syncLexical;
   const handleAudioChunkRef = useRef<(blob: Blob, mimeType: string) => void>(() => {});
 
   const formatHeading = (headingSize) => {
@@ -858,22 +865,6 @@ function ToolbarPlugin({
       }
     }
 
-    const mimeType = recorder?.mimeType || 'audio/webm';
-    const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
-    recordingChunksRef.current = [];
-    try {
-      if (fullBlob.size > 0) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
-        const cfg = recordingConfigRef.current;
-        // Complete recording goes to the erp-file-complete folder (a sibling of
-        // the chunk prefix derived from the recording_path returned by backend).
-        const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
-        await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase);
-      }
-    } catch (err) {
-      console.error('[scribe] Failed to upload complete recording:', err);
-    }
     isRecordingRef.current = false;
     if (scriptProcessorRef.current) {
       try { scriptProcessorRef.current.disconnect(); } catch (_) {}
@@ -894,11 +885,40 @@ function ToolbarPlugin({
       clearTimeout(scribeSyncTimerRef.current);
       scribeSyncTimerRef.current = null;
     }
+
+    // 1. Immediately finalize consultation over WebSocket so doctor gets report instantly
     console.log('[scribe] handleStopRecording -> finalizeConsultationRef.current({ applyLexical: true })');
+    let finalizePromise: Promise<any> | null = null;
     try {
-      await finalizeConsultationRef.current({ applyLexical: true });
+      finalizePromise = finalizeConsultationRef.current({ applyLexical: true });
     } catch (err) {
       console.error('[scribe] finalizeConsultation threw:', err);
+    }
+
+    // 2. Background upload of full audio blob
+    const mimeType = recorder?.mimeType || 'audio/webm';
+    const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
+    recordingChunksRef.current = [];
+    try {
+      if (fullBlob.size > 0) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
+        const cfg = recordingConfigRef.current;
+        const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
+        uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase).catch((err) => {
+          console.error('[scribe] Failed to upload complete recording in background:', err);
+        });
+      }
+    } catch (err) {
+      console.error('[scribe] Failed to prepare complete recording:', err);
+    }
+
+    if (finalizePromise) {
+      try {
+        await finalizePromise;
+      } catch (err) {
+        console.error('[scribe] Error awaiting finalization:', err);
+      }
     }
   };
 
@@ -924,6 +944,24 @@ function ToolbarPlugin({
 
       // 1. Immediately trigger Scribe WebSocket sync with GPU /health check
       startScribeSyncRef.current();
+
+      // Clear old transcripts on GPU so this recording begins cleanly
+      try {
+        resetSessionRef.current?.({ clearTranscripts: true });
+      } catch (err) {
+        console.warn('[scribe] resetSession call error:', err);
+      }
+
+      // Sync active editor state to GPU server so it refits the active template
+      try {
+        const currentEditor = editorInstanceRef.current;
+        if (currentEditor) {
+          const editorState = currentEditor.getEditorState();
+          syncLexicalRef.current?.(editorState.toJSON());
+        }
+      } catch (err) {
+        console.warn('[scribe] syncLexical call error:', err);
+      }
 
       // 2. Set up Web Audio API 16kHz PCM streaming in milliseconds (256ms)
       try {

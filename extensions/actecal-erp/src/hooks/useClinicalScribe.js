@@ -380,6 +380,34 @@ export const useClinicalScribe = ({
     return true;
   }, [department, testType, setStatus, startFallbackPolling]);
 
+  const resetSession = useCallback(
+    async ({ clearTranscripts = true } = {}) => {
+      if (ScribeSocketService.isOpen()) {
+        console.log('[scribe] Sending reset_session to GPU server');
+        ScribeSocketService.send({
+          action: 'reset_session',
+          clear_transcripts: clearTranscripts,
+          department,
+          test_type: testType,
+        });
+      }
+    },
+    [department, testType],
+  );
+
+  const syncLexical = useCallback(
+    async (lexicalState) => {
+      if (ScribeSocketService.isOpen() && lexicalState) {
+        console.log('[scribe] Sending sync_lexical to GPU server');
+        ScribeSocketService.send({
+          action: 'sync_lexical',
+          lexical: lexicalState,
+        });
+      }
+    },
+    [],
+  );
+
   const finalizeConsultation = useCallback(
     async ({ applyLexical = true } = {}) => {
       stopFallbackPolling();
@@ -408,6 +436,12 @@ export const useClinicalScribe = ({
           if (applyLexical && msg?.data?.lexical) {
             updateLexicalEditor(msg.data.lexical, 'ws-final');
           }
+          finalizedRef.current = true;
+          activeRef.current = false;
+          setIsFinalizing(false);
+          finalizingRef.current = false;
+          finalizeInFlightRef.current = false;
+          setStatus('finalized');
           return msg;
         } catch (error) {
           // Timed out or dropped mid-flush. The REST endpoint can still finish
@@ -502,6 +536,8 @@ export const useClinicalScribe = ({
     transport,
     startScribeSync,
     stopScribeSync,
+    resetSession,
+    syncLexical,
     finalizeConsultation,
     updateLexicalEditor,
   };
