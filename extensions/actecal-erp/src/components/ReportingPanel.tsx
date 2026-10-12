@@ -324,6 +324,16 @@ function SubmitReportPlugin({
           type: 'info',
         });
 
+        // 0. Finalize Scribe session if active so all pending transcripts are applied to the report
+        if (typeof (window as any).actecalFinalizeConsultation === 'function') {
+          console.log('[ScribeState] SUBMIT_REPORT: Finalizing Scribe consultation before submission...');
+          try {
+            await (window as any).actecalFinalizeConsultation();
+          } catch (finErr) {
+            console.warn('[ScribeState] Finalize consultation warning:', finErr);
+          }
+        }
+
         // 1. Extract JSON state
         const editorState = editor.getEditorState();
         const jsonState = editorState.toJSON();
@@ -440,8 +450,11 @@ function ToolbarPlugin({
       ''
   );
   // effective visitId: recording-config visit_id takes priority, then
-  // getAutoFillTemplate's visitId (falling back through either path).
-  const finalVisitId = visitId || resolvedVisitId || '';
+  // getAutoFillTemplate's visitId, then deterministic fallback on studyUid.
+  // This guarantees each study/patient has an isolated session and cannot contaminate others!
+  const fallbackStudyVisitId = studyUid ? ('study_' + studyUid.replace(/[^a-zA-Z0-9_-]/g, '_').slice(-24)) : '';
+  const finalVisitId = visitId || resolvedVisitId || fallbackStudyVisitId || '';
+
   // The GPU box keys its transcript session on department/test_type as well as
   // tenant+visit, so forward the ids resolved from getAutoFillTemplate instead
   // of letting the socket fall back to its generic defaults.
@@ -465,12 +478,14 @@ function ToolbarPlugin({
   // Fallback mode state: when GPU WebSocket is healthy, audio chunks are kept in memory
   // and NOT uploaded to GCS (to avoid firing Pub/Sub webhooks that spin up Cloud Run and incur costs).
   // Chunks are ONLY uploaded to GCS if WebSocket fails or goes down (fallback mode).
-  // Declared before useClinicalScribe/the render body reads it (TDZ otherwise).
   const isFallbackActiveRef = useRef<boolean>(false);
 
   const {
     startScribeSync,
     finalizeConsultation,
+    resetSession,
+    syncLexical,
+    flushAudioBuffer,
     reportStatus,
     transport,
     serverHealth,
@@ -480,8 +495,8 @@ function ToolbarPlugin({
   } = useClinicalScribe({
     tenantName,
     visitId: finalVisitId,
-    department: department || 'general',
-    testType: testType || 'consultation',
+    department: department || 'radiology',
+    testType: testType || 'radiodiagnosis',
     editorInstanceRef,
     onLexicalApplied: handleLexicalApplied,
     onFallbackActivated: () => {
@@ -552,7 +567,33 @@ function ToolbarPlugin({
   startScribeSyncRef.current = startScribeSync;
   const finalizeConsultationRef = useRef(finalizeConsultation);
   finalizeConsultationRef.current = finalizeConsultation;
+  const resetSessionRef = useRef(resetSession);
+  resetSessionRef.current = resetSession;
+  const syncLexicalRef = useRef(syncLexical);
+  syncLexicalRef.current = syncLexical;
+  const flushAudioBufferRef = useRef(flushAudioBuffer);
+  flushAudioBufferRef.current = flushAudioBuffer;
   const handleAudioChunkRef = useRef<(blob: Blob, mimeType: string) => void>(() => {});
+
+  // Expose consultation finalizer globally for SubmitReportPlugin
+  useEffect(() => {
+    (window as any).actecalFinalizeConsultation = () => finalizeConsultationRef.current({ applyLexical: true });
+    return () => {
+      delete (window as any).actecalFinalizeConsultation;
+    };
+  }, []);
+
+  // Whenever active study changes, reset study-specific scribe state
+  useEffect(() => {
+    console.log(`[ScribeState] ToolbarPlugin: active study changed to ${studyUid}`);
+    setVisitId('');
+    recordingConfigRef.current = null;
+    recordingConfigForRefRef.current = null;
+    autoStartedForRef.current = null;
+    if (isRecordingRef.current) {
+      handleStopRecording();
+    }
+  }, [studyUid]);
 
   const formatHeading = (headingSize) => {
     editor.update(() => {
@@ -858,22 +899,6 @@ function ToolbarPlugin({
       }
     }
 
-    const mimeType = recorder?.mimeType || 'audio/webm';
-    const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
-    recordingChunksRef.current = [];
-    try {
-      if (fullBlob.size > 0) {
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
-        const cfg = recordingConfigRef.current;
-        // Complete recording goes to the erp-file-complete folder (a sibling of
-        // the chunk prefix derived from the recording_path returned by backend).
-        const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
-        await uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase);
-      }
-    } catch (err) {
-      console.error('[scribe] Failed to upload complete recording:', err);
-    }
     isRecordingRef.current = false;
     if (scriptProcessorRef.current) {
       try { scriptProcessorRef.current.disconnect(); } catch (_) {}
@@ -890,15 +915,30 @@ function ToolbarPlugin({
     mediaRecorderRef.current = null;
     recordingChunkIndexRef.current = 0;
     setIsRecording(false);
-    if (scribeSyncTimerRef.current) {
-      clearTimeout(scribeSyncTimerRef.current);
-      scribeSyncTimerRef.current = null;
+    // Flush pending speech buffer to GPU server:
+    // This transcribes the last spoken words, runs lexical compilation on all accumulated chunks,
+    // and emits parallel_summary to update the editor — while MAINTAINING the session and WebSocket!
+    if (ScribeSocketService.isOpen()) {
+      console.log(`[ScribeState] MIC_OFF: Flushing audio buffer to GPU server for ${finalVisitId} (maintaining session)`);
+      flushAudioBufferRef.current?.();
     }
-    console.log('[scribe] handleStopRecording -> finalizeConsultationRef.current({ applyLexical: true })');
+
+    // 2. Background upload of full audio blob
+    const mimeType = recorder?.mimeType || 'audio/webm';
+    const fullBlob = new Blob(recordingChunksRef.current, { type: mimeType });
+    recordingChunksRef.current = [];
     try {
-      await finalizeConsultationRef.current({ applyLexical: true });
+      if (fullBlob.size > 0) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const ext = mimeType?.includes('mp4') ? 'mp4' : 'webm';
+        const cfg = recordingConfigRef.current;
+        const completeBase = cfg?.prefix?.replace(/^erp-files\//, 'erp-file-complete/');
+        uploadToGcpPath(fullBlob, `complete_recording_${ts}.${ext}`, mimeType, completeBase).catch((err) => {
+          console.error('[scribe] Failed to upload complete recording in background:', err);
+        });
+      }
     } catch (err) {
-      console.error('[scribe] finalizeConsultation threw:', err);
+      console.error('[scribe] Failed to prepare complete recording:', err);
     }
   };
 
@@ -909,21 +949,34 @@ function ToolbarPlugin({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       return;
     }
+    console.log(`[ScribeState] MIC_ON: starting/resuming microphone for finalVisitId=${finalVisitId}`);
     try {
       const ok = await fetchRecordingConfig();
       if (!ok) {
-        console.warn('[scribe] startRecording aborted: no recording config', { silent: opts?.silent });
-        if (!opts?.silent) {
-          console.warn('Could not get recording config from backend');
-        }
-        return;
+        console.warn(`[ScribeState] No GCP recording config for ref, proceeding with direct GPU WebSocket using session ${finalVisitId}`);
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // 1. Immediately trigger Scribe WebSocket sync with GPU /health check
-      startScribeSyncRef.current();
+      // 1. Ensure Scribe WebSocket sync is active for this visit
+      if (!ScribeSocketService.isOpen()) {
+        console.log(`[ScribeState] MIC_ON: Connecting Scribe WebSocket for ${finalVisitId}`);
+        await startScribeSyncRef.current();
+      }
+
+      // DO NOT reset session! The session is maintained across mic on/off for the same visitId.
+
+      // Sync active editor state to GPU server so it refits the active template
+      try {
+        const currentEditor = editorInstanceRef.current;
+        if (currentEditor) {
+          const editorState = currentEditor.getEditorState();
+          syncLexicalRef.current?.(editorState.toJSON());
+        }
+      } catch (err) {
+        console.warn('[ScribeState] syncLexical call error:', err);
+      }
 
       // 2. Set up Web Audio API 16kHz PCM streaming in milliseconds (256ms)
       try {
@@ -1133,6 +1186,34 @@ function ToolbarPlugin({
               {serverSignalBadge.label}
             </span>
 
+            {/* Active Session & Patient indicator */}
+            <span
+              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-700 border border-gray-300 flex items-center gap-1 cursor-default"
+              title={`Active Session: ${finalVisitId || 'unassigned'} | ERP Ref: ${erpRefId || 'none'} | Dept: ${department || 'auto'}`}
+            >
+              <span>ID:</span>
+              <span className="font-bold text-blue-700">
+                {finalVisitId ? (finalVisitId.length > 10 ? `${finalVisitId.slice(0, 8)}…` : finalVisitId) : 'none'}
+              </span>
+            </span>
+
+            {/* Manual Session Reset */}
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Reset speech transcripts for session ${finalVisitId}?`)) {
+                  console.log(`[ScribeState] User triggered manual session reset for ${finalVisitId}`);
+                  resetSessionRef.current?.({ clearTranscripts: true });
+                  setLiveTranscript('');
+                  setAiNotes('');
+                }
+              }}
+              className="shrink-0 text-[10px] text-gray-500 hover:text-red-600 px-1 py-0.5 border border-gray-200 hover:border-red-300 rounded bg-white transition-colors"
+              title="Reset speech transcription for this session"
+            >
+              🔄
+            </button>
+
             <div className="w-px h-5 bg-gray-300 mx-0.5 shrink-0"></div>
 
             <select
@@ -1257,6 +1338,34 @@ function ToolbarPlugin({
             <span className={`w-2 h-2 rounded-full ${serverSignalBadge.dotClass}`} />
             {serverSignalBadge.label}
           </span>
+
+          {/* Active Session & Patient indicator */}
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-700 border border-gray-300 flex items-center gap-1 cursor-default"
+            title={`Active Session: ${finalVisitId || 'unassigned'} | ERP Ref: ${erpRefId || 'none'} | Dept: ${department || 'auto'}`}
+          >
+            <span>ID:</span>
+            <span className="font-bold text-blue-700">
+              {finalVisitId ? (finalVisitId.length > 14 ? `${finalVisitId.slice(0, 12)}…` : finalVisitId) : 'none'}
+            </span>
+          </span>
+
+          {/* Manual Session Reset */}
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm(`Reset speech transcripts for session ${finalVisitId}?`)) {
+                console.log(`[ScribeState] User triggered manual session reset for ${finalVisitId}`);
+                resetSessionRef.current?.({ clearTranscripts: true });
+                setLiveTranscript('');
+                setAiNotes('');
+              }
+            }}
+            className="shrink-0 text-[10px] text-gray-500 hover:text-red-600 px-1.5 py-0.5 border border-gray-200 hover:border-red-300 rounded bg-white transition-colors"
+            title="Reset speech transcription for this session"
+          >
+            🔄 Reset
+          </button>
 
           <div className="w-px h-5 bg-gray-300 mx-1"></div>
 
@@ -1728,22 +1837,26 @@ function ReportingPanel() {
   // + test) on open, and prefetch the GCP recording config keyed by ref id so
   // recording can start instantly on the mic button.
   useEffect(() => {
-    if (!studyUid) {
-      setDraftContent('');
-      setLiveTranscript('');
-      setAiNotes('');
-      transcriptRef.current = '';
-      aiNotesRef.current = '';
-      setViewMode('report');
-      return;
-    }
-
-    let cancelled = false;
+    console.log(`[ScribeState] ReportingPanel: studyUid changed to "${studyUid || ''}"`);
+    // Immediately clear all previous study state to avoid leaking between patients
+    setErpRefId('');
+    setResolvedVisitId('');
+    setDepartmentId('');
+    setTestId('');
+    setDraftContent('');
+    setPrefillContent(null);
+    setSelectedTemplateId('');
     setLiveTranscript('');
     setAiNotes('');
     transcriptRef.current = '';
     aiNotesRef.current = '';
     setViewMode('report');
+
+    if (!studyUid) {
+      return;
+    }
+
+    let cancelled = false;
 
     const loadStudyContent = async () => {
       try {
@@ -1753,18 +1866,19 @@ function ReportingPanel() {
         let erpRef = '';
         try {
           const tpl = await apiService.getAutoFillTemplate(studyUid);
-          if (tpl && (tpl.erpRefId || tpl.presignedUrl)) {
+          console.log(`[ScribeState] AutoFillTemplate lookup for ${studyUid}:`, tpl);
+          if (tpl) {
             erpRef = tpl.erpRefId || '';
-            if (!cancelled) setErpRefId(erpRef);
+            if (!cancelled && erpRef) setErpRefId(erpRef);
             if (!cancelled) {
-              setDepartmentId(tpl.departmentId || '');
-              setTestId(tpl.testId || '');
+              if (tpl.departmentId) setDepartmentId(String(tpl.departmentId));
+              if (tpl.testId) setTestId(String(tpl.testId));
             }
             // Capture visitId from the auto-fill response as a fallback in
             // case get-recording-config does not include one.
             const tplVisitRaw = tpl?.visitId || tpl?.visit_id || tpl?.visitID;
             const tplVisitId = tplVisitRaw != null && String(tplVisitRaw).trim() !== '' ? String(tplVisitRaw) : '';
-            if (!cancelled) setResolvedVisitId(tplVisitId);
+            if (!cancelled && tplVisitId) setResolvedVisitId(tplVisitId);
             if (tpl.presignedUrl) {
               const fileRes = await fetch(tpl.presignedUrl);
               const text = await fileRes.text();
@@ -1776,7 +1890,7 @@ function ReportingPanel() {
             }
           }
         } catch (err) {
-          console.warn('Auto-fill template lookup failed', err);
+          console.warn('[ScribeState] Auto-fill template lookup failed', err);
         }
 
         // Prefetch GCP recording config keyed by the patient's ref id (receipt

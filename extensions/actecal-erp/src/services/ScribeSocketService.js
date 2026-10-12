@@ -329,9 +329,15 @@ class ScribeSocketService {
       return false;
     }
     if (this.ws || this.reconnectTimer) {
-      return true;
+      if (this.params && (this.params.visitId !== visitId || this.params.tenant !== tenant)) {
+        console.log(`[ScribeState] Socket params changed: from visit=${this.params.visitId} to visit=${visitId}. Disconnecting old socket.`);
+        this.disconnect();
+      } else {
+        return true;
+      }
     }
 
+    console.log(`[ScribeState] Connecting WebSocket for tenant=${tenant}, visitId=${visitId}, dept=${department}, test=${testType}`);
     this.params = { tenant, visitId, department, testType };
     this.shouldReconnect = true;
     this.attempt = 0;
@@ -568,6 +574,14 @@ class ScribeSocketService {
       console.error('[scribe-socket] sendBinary failed', err);
       return false;
     }
+  }
+
+  flush() {
+    if (!this.isOpen()) {
+      return false;
+    }
+    console.log('[ScribeState] -> ScribeSocketService.flush()');
+    return this.send({ action: 'flush' });
   }
 
   // Resolves with the server's `completed` payload. Rejects on timeout so the
