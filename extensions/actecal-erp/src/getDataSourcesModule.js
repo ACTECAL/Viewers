@@ -316,6 +316,7 @@ try {
                 modalities: item.type || '',
                 instances: item.instances || 0,
                 description: item.description || '',
+                status: item.status || '',
               };
             });
 

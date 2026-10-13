@@ -6,7 +6,14 @@ import { HangingProtocolService, CommandsManager } from '@ohif/core';
 import { useAppConfig } from '@state';
 import ViewerHeader from './ViewerHeader';
 import SidePanelWithServices from '../Components/SidePanelWithServices';
-import { Onboarding, ResizablePanelGroup, ResizablePanel, ResizableHandle, Button, Icons } from '@ohif/ui-next';
+import {
+  Onboarding,
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+  Button,
+  Icons,
+} from '@ohif/ui-next';
 import useResizablePanels from './ResizablePanelsHook';
 
 const resizableHandleClassName = 'mt-[1px] bg-background';
@@ -31,7 +38,8 @@ function ViewerLayout({
 }: withAppTypes): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
-  const { panelService, hangingProtocolService, customizationService, uiNotificationService } = servicesManager.services;
+  const { panelService, hangingProtocolService, customizationService, uiNotificationService } =
+    servicesManager.services;
   const [showLoadingIndicator, setShowLoadingIndicator] = useState(appConfig.showLoadingIndicator);
 
   const hasPanels = useCallback(
@@ -57,17 +65,29 @@ function ViewerLayout({
       }
     };
 
-    const handleKeyDown = (e) => {
-      console.log('Key pressed:', e.key, 'Target:', e.target.tagName, 'ContentEditable:', e.target.isContentEditable);
+    const handleKeyDown = e => {
+      console.log(
+        'Key pressed:',
+        e.key,
+        'Target:',
+        e.target.tagName,
+        'ContentEditable:',
+        e.target.isContentEditable
+      );
       // Toggle fullscreen on 'f' or 'F' if not focusing an input or contenteditable element
-      if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
+      if (
+        (e.key === 'f' || e.key === 'F') &&
+        e.target.tagName !== 'INPUT' &&
+        e.target.tagName !== 'TEXTAREA' &&
+        !e.target.isContentEditable
+      ) {
         e.preventDefault();
         const isFS = !!document.fullscreenElement;
         const panelsClosed = leftPanelClosedState && rightPanelClosedState;
 
         if (!isFS) {
           // State 0 -> State 1: Enter FS, hide panels
-          document.documentElement.requestFullscreen().catch((err) => {
+          document.documentElement.requestFullscreen().catch(err => {
             console.warn(`Error attempting to enable fullscreen mode: ${err.message}`);
           });
           setLeftPanelClosed(true);
@@ -228,7 +248,7 @@ function ViewerLayout({
     window.addEventListener('panel-tab-changed', handleTabChange);
     window.addEventListener('toggle-mobile-left-panel', handleMobileToggleLeft);
     window.addEventListener('toggle-mobile-right-panel', handleMobileToggleRight);
-    
+
     const handleMobileActivateTab = (e: any) => {
       if (e.detail?.panelId) {
         panelService.activatePanel(e.detail.panelId);
@@ -261,31 +281,29 @@ function ViewerLayout({
   const isZenMode = isFullscreen && leftPanelClosedState && rightPanelClosedState;
 
   const handleSubmitReport = useCallback(async () => {
-    try {
-      const studyInstanceUID = viewports[0]?.displaySetsToDisplay?.[0]?.StudyInstanceUID;
-      const response = await fetch(`${appConfig.apiBaseUrl}/erp/autolight/dicom/worklist/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ StudyInstanceUID: studyInstanceUID, status: 'REPORTED' })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      if (window.opener) {
-        window.close();
-      } else {
-        window.location.href = '/';
-      }
-    } catch (err) {
-      console.error('Failed to submit report', err);
-      uiNotificationService.show({
-        title: 'Submit Failed',
-        message: 'Report not submitted',
-        type: 'error',
-      });
-    }
+    // try {
+    // const studyInstanceUID = viewports[0]?.displaySetsToDisplay?.[0]?.StudyInstanceUID;
+    // const response = await fetch(`${appConfig.apiBaseUrl}/erp/autolight/dicom/worklist/submit`, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({ StudyInstanceUID: studyInstanceUID, status: 'REPORTED' })
+    // });
+    // if (!response.ok) {
+    //   throw new Error(`HTTP error! status: ${response.status}`);
+    // }
+    // if (window.opener) {
+    //   window.close();
+    // } else {
+    //   window.location.href = '/';
+    // }
+    //   } catch (err) {
+    //     console.error('Failed to submit report', err);
+    //     uiNotificationService.show({
+    //       title: 'Submit Failed',
+    //       message: 'Report not submitted',
+    //       type: 'error',
+    //     });
+    // }
   }, [viewports, appConfig, uiNotificationService]);
 
   useEffect(() => {
@@ -299,12 +317,17 @@ function ViewerLayout({
       const { uiDialogService } = servicesManager.services;
       const ReloginDialogContent = ({ hide }: { hide?: () => void }) => (
         <div className="flex flex-col gap-4">
-          <p className="text-gray-300">Your session has expired or is unauthenticated. Please login again to continue.</p>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button onClick={() => {
-               hide?.();
-               window.location.reload();
-            }} className="bg-[#5b65d6] hover:bg-[#4a54c4] text-white">
+          <p className="text-gray-300">
+            Your session has expired or is unauthenticated. Please login again to continue.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              onClick={() => {
+                hide?.();
+                window.location.reload();
+              }}
+              className="bg-[#5b65d6] text-white hover:bg-[#4a54c4]"
+            >
               Login
             </Button>
           </div>
@@ -333,13 +356,16 @@ function ViewerLayout({
       )}
       {isZenMode && (
         <div
-          className="absolute top-0 left-0 w-full z-50 transition-transform duration-300 ease-in-out"
-          style={{ transform: isHeaderHovered ? 'translateY(0)' : 'translateY(calc(-100% + 12px))', opacity: isHeaderHovered ? 1 : 0 }}
+          className="absolute top-0 left-0 z-50 w-full transition-transform duration-300 ease-in-out"
+          style={{
+            transform: isHeaderHovered ? 'translateY(0)' : 'translateY(calc(-100% + 12px))',
+            opacity: isHeaderHovered ? 1 : 0,
+          }}
           onMouseEnter={() => setIsHeaderHovered(true)}
           onMouseLeave={() => setIsHeaderHovered(false)}
         >
           {/* Invisible trigger zone at the very bottom so it remains easy to hover when hidden */}
-          {!isHeaderHovered && <div className="absolute bottom-0 w-full h-[12px] cursor-pointer" />}
+          {!isHeaderHovered && <div className="absolute bottom-0 h-[12px] w-full cursor-pointer" />}
           <ViewerHeader
             hotkeysManager={hotkeysManager}
             extensionManager={extensionManager}
@@ -349,16 +375,21 @@ function ViewerLayout({
         </div>
       )}
       <div
-        className="relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden bg-background"
+        className="bg-background relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
         style={{ height: isZenMode ? '100vh' : 'calc(100vh - 52px)' }}
       >
         <React.Fragment>
-          {showLoadingIndicator && <LoadingIndicatorProgress className="h-full w-full bg-background" />}
+          {showLoadingIndicator && (
+            <LoadingIndicatorProgress className="bg-background h-full w-full" />
+          )}
           <ResizablePanelGroup {...resizablePanelGroupProps}>
             {/* LEFT SIDEPANELS */}
             {hasLeftPanels ? (
               <>
-                <ResizablePanel {...resizableLeftPanelProps} className="relative">
+                <ResizablePanel
+                  {...resizableLeftPanelProps}
+                  className="relative"
+                >
                   <SidePanelWithServices
                     side="left"
                     isExpanded={!leftPanelClosedState}
@@ -377,7 +408,7 @@ function ViewerLayout({
             <ResizablePanel {...resizableViewportGridPanelProps}>
               <div className="flex h-full flex-1 flex-col">
                 <div
-                  className="relative flex h-full flex-1 items-center justify-center overflow-hidden bg-background"
+                  className="bg-background relative flex h-full flex-1 items-center justify-center overflow-hidden"
                   onMouseEnter={handleMouseEnter}
                 >
                   <ViewportGridComp
@@ -395,7 +426,10 @@ function ViewerLayout({
                   disabled={!rightPanelResizable}
                   className={resizableHandleClassName}
                 />
-                <ResizablePanel {...resizableRightPanelProps} className="relative">
+                <ResizablePanel
+                  {...resizableRightPanelProps}
+                  className="relative"
+                >
                   <SidePanelWithServices
                     side="right"
                     isExpanded={!rightPanelClosedState}

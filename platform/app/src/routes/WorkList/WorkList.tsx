@@ -331,7 +331,7 @@ function WorkList({
         },
         {
           key: 'status',
-          content: 'CREATED', // placeholder
+          content: study.status || 'CREATED',
           gridCol: 3,
         },
         {
