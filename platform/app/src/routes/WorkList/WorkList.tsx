@@ -46,6 +46,15 @@ const { sortBySeriesDate } = utils;
 
 const seriesInStudiesMap = new Map();
 
+function toTitleCase(value) {
+  if (!value) {
+    return value;
+  }
+  return String(value)
+    .toLowerCase()
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 /**
  * TODO:
  * - debounce `setFilterValues` (150ms?)
@@ -257,7 +266,6 @@ function WorkList({
       studyInstanceUid,
       accession,
       modalities,
-      instances,
       description,
       mrn,
       patientName,
@@ -305,28 +313,12 @@ function WorkList({
         },
         {
           key: 'patientName',
-          content: patientName ? makeCopyTooltipCell(patientName) : null,
+          content: patientName ? makeCopyTooltipCell(toTitleCase(patientName)) : null,
           gridCol: 3,
         },
         {
           key: 'patientAge',
           content: study.patientAge || 'NA',
-          gridCol: 2,
-        },
-        {
-          key: 'instances',
-          content: (
-            <>
-              <Icons.GroupLayers
-                className={classnames('mr-2 inline-flex w-4', {
-                  'text-primary': isExpanded,
-                  'text-secondary-light': !isExpanded,
-                })}
-              />
-              {instances}
-            </>
-          ),
-          title: (instances || 0).toString(),
           gridCol: 2,
         },
         {
