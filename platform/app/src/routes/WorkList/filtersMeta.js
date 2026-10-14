@@ -23,13 +23,6 @@ const filtersMeta = [
     gridCol: 2,
   },
   {
-    name: 'instances',
-    displayName: 'Images',
-    inputType: 'None',
-    isSortable: false,
-    gridCol: 2,
-  },
-  {
     name: 'status',
     displayName: 'Status',
     inputType: 'MultiSelect',
