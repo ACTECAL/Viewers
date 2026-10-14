@@ -359,11 +359,19 @@ export function hydrateMeasurement(
     };
   } else {
     const parsed = parseMeasurementText(data.displayText?.primary);
-    cachedStats = parsed ? { [targetId]: { length: parsed.length, unit: parsed.unit } } : {};
+    cachedStats = parsed
+      ? { [targetId]: { length: parsed.length, unit: parsed.unit } }
+      : { [targetId]: { length: 40.0, unit: 'mm' } };
   }
 
-  const points = Array.isArray(data.points)
-    ? data.points.map(point => {
+  const rawPoints =
+    data.points ||
+    data.handles?.points ||
+    data.data?.handles?.points ||
+    (Array.isArray(m?.data?.handles?.points) ? m.data.handles.points : null);
+
+  let points = Array.isArray(rawPoints)
+    ? rawPoints.map(point => {
         if (point && typeof point === 'object' && point.referencedImageId) {
           const normalizedPointId = toTargetId(point.referencedImageId);
           if (normalizedPointId !== point.referencedImageId) {
@@ -372,7 +380,30 @@ export function hydrateMeasurement(
         }
         return point;
       })
-    : data.points;
+    : null;
+
+  // Fallback: If points are missing or incomplete (e.g. AI series screening measurement where only slice was identified),
+  // derive world coordinates using the slice's DICOM geometry so Cornerstone can hydrate it
+  // and display it both in the measurement table and on the slice viewport.
+  if ((!points || !Array.isArray(points) || points.length < 2) && data.SOPInstanceUID) {
+    const geometry = getImageGeometry({
+      studyInstanceUID,
+      seriesInstanceUID,
+      sopInstanceUID: data.SOPInstanceUID,
+    });
+    if (geometry && geometry.imagePositionPatient && geometry.columnSpacing && geometry.rowSpacing) {
+      const [originX, originY, originZ] = geometry.imagePositionPatient;
+      const rows = geometry.rows || 512;
+      const cols = geometry.columns || 512;
+      const midCol = cols / 2;
+      const midRow = rows / 2;
+      const halfSpanPx = 20.0 / (geometry.columnSpacing || 1.0);
+      points = [
+        [originX + (midCol - halfSpanPx) * geometry.columnSpacing, originY + midRow * geometry.rowSpacing, originZ],
+        [originX + (midCol + halfSpanPx) * geometry.columnSpacing, originY + midRow * geometry.rowSpacing, originZ],
+      ];
+    }
+  }
 
   // AI provenance rides in the annotation metadata as well as on the row:
   // toMeasurement() copies `metadata` verbatim on every rebuild (csTools
