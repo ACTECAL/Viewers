@@ -91,6 +91,9 @@ function resolveActiveInstance(displaySetService, viewport, displaySetInstanceUI
     return null;
   }
 
+  const resolvedImageId =
+    currentImageId || (imageIds && imageIds[index]) || instance.imageId || null;
+
   return {
     sopInstanceUID: instance.SOPInstanceUID,
     seriesInstanceUID: instance.SeriesInstanceUID || displaySet?.SeriesInstanceUID,
@@ -98,6 +101,8 @@ function resolveActiveInstance(displaySetService, viewport, displaySetInstanceUI
     instanceNumber: instance.InstanceNumber ?? null,
     // 1-based position of the displayed slice within the display set.
     sliceIndex: index >= 0 ? index + 1 : null,
+    imageId: resolvedImageId,
+    frameOfReferenceUID: instance.FrameOfReferenceUID || displaySet?.FrameOfReferenceUID || null,
     displaySet,
   };
 }
@@ -108,7 +113,14 @@ function resolveActiveInstance(displaySetService, viewport, displaySetInstanceUI
  * label reports exactly what the model said.
  */
 function buildAiRow(measurement, context, index) {
-  const { worldPoints, instance, studyInstanceUID, model } = context;
+  const { worldPoints, instance, studyInstanceUID, model, geometry } = context;
+
+  const frameOfReferenceUID =
+    geometry?.frameOfReferenceUID ||
+    context.geometry?.frameOfReferenceUID ||
+    instance?.frameOfReferenceUID ||
+    instance?.displaySet?.FrameOfReferenceUID ||
+    null;
 
   return {
     uid: `ai-${Date.now()}-${index}-${measurement.id}`,
@@ -123,7 +135,7 @@ function buildAiRow(measurement, context, index) {
     SOPInstanceUID: instance.sopInstanceUID,
     SeriesInstanceUID: instance.seriesInstanceUID,
     StudyInstanceUID: studyInstanceUID,
-    FrameOfReferenceUID: context.geometry?.frameOfReferenceUID ?? null,
+    FrameOfReferenceUID: frameOfReferenceUID,
     referencedImageId: instance.imageId || null,
     // Provenance: read back by the sidebars, the legend and the report.
     created_by: AI_AUTHOR_KEY,
@@ -369,7 +381,7 @@ export function useDicomAiAnalysis({ servicesManager, extensionManager }) {
 
         const row = buildAiRow(
           measurement,
-          { worldPoints, instance, studyInstanceUID, model },
+          { worldPoints, instance, studyInstanceUID, model, geometry },
           index
         );
 
@@ -409,7 +421,15 @@ export function useDicomAiAnalysis({ servicesManager, extensionManager }) {
                     : `${row.stats.length} mm`,
                   ...(row.stats.width != null ? [`W: ${row.stats.width} mm`] : []),
                 ],
-                secondary: [],
+                secondary: [`S: ${instance.sliceIndex || 1} I: ${instance.instanceNumber || 1}`],
+              },
+              textBox: {
+                hasMoved: false,
+                worldPosition:
+                  row.points && row.points.length > 1
+                    ? [row.points[1][0], row.points[1][1], row.points[1][2] + 20.0]
+                    : null,
+                worldBoundingBox: null,
               },
               created_by: AI_AUTHOR_KEY,
               colorHex: AI_COLOR,

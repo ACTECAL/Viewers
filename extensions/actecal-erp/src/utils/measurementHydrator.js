@@ -139,6 +139,7 @@ export function resolveImageReference(
         SOPInstanceUID: sopInstanceUid,
         SeriesInstanceUID: ds.SeriesInstanceUID || instances[idx]?.SeriesInstanceUID,
         StudyInstanceUID: ds.StudyInstanceUID || studyUid,
+        FrameOfReferenceUID: ds.FrameOfReferenceUID || instances[idx]?.FrameOfReferenceUID || null,
       };
     }
   }
@@ -315,12 +316,22 @@ export function hydrateMeasurement(
   // Prefer the display set's own imageId: it is the exact string the viewport
   // and OHIF's metadata provider are keyed on. Only fall back to whatever was
   // persisted on the row.
-  const resolved = resolveImageReference(
+  let resolved = resolveImageReference(
     displaySetService,
     studyInstanceUID,
     data.SOPInstanceUID,
     seriesInstanceUID
   );
+
+  // Fallback: If not resolved with seriesInstanceUID, try without seriesInstanceUID filter
+  if (!resolved && data.SOPInstanceUID) {
+    resolved = resolveImageReference(
+      displaySetService,
+      studyInstanceUID,
+      data.SOPInstanceUID,
+      null
+    );
+  }
 
   let referencedImageId = resolved?.referencedImageId;
   if (resolved) {
@@ -332,6 +343,20 @@ export function hydrateMeasurement(
     referencedImageId = stripTargetIdPrefix(
       data.referencedImageId || data.metadata?.referencedImageId || null
     );
+  }
+
+  // Fallback: Construct canonical wadors URI from activeDataSource if SOPInstanceUID is known
+  if (!referencedImageId && data.SOPInstanceUID && studyInstanceUID && seriesInstanceUID) {
+    try {
+      const activeDataSource = extensionManager?.getActiveDataSource?.();
+      const dsConfig = activeDataSource?.[0]?.getConfig?.() || {};
+      const wadoRoot = dsConfig.wadoRoot || dsConfig.wadoUriRoot;
+      if (wadoRoot) {
+        referencedImageId = `wadors:${wadoRoot}/studies/${studyInstanceUID}/series/${seriesInstanceUID}/instances/${data.SOPInstanceUID}/frames/1`;
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   if (!referencedImageId) {
@@ -405,6 +430,38 @@ export function hydrateMeasurement(
     }
   }
 
+  // Auto-resolve FrameOfReferenceUID if missing from the saved row
+  let frameOfReferenceUID =
+    data.FrameOfReferenceUID ||
+    data.metadata?.FrameOfReferenceUID ||
+    m?.frame_of_reference_uid ||
+    resolved?.FrameOfReferenceUID ||
+    null;
+
+  if (!frameOfReferenceUID && data.SOPInstanceUID) {
+    try {
+      const dicomInstance = DicomMetadataStore.getInstance(
+        studyInstanceUID,
+        seriesInstanceUID,
+        data.SOPInstanceUID
+      );
+      frameOfReferenceUID = dicomInstance?.FrameOfReferenceUID || null;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  if (!frameOfReferenceUID && seriesInstanceUID && displaySetService) {
+    try {
+      const matchedDs = displaySetService.getDisplaySetsBy?.(d => d.SeriesInstanceUID === seriesInstanceUID);
+      if (matchedDs && matchedDs[0]) {
+        frameOfReferenceUID = matchedDs[0].FrameOfReferenceUID || null;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
   // AI provenance rides in the annotation metadata as well as on the row:
   // toMeasurement() copies `metadata` verbatim on every rebuild (csTools
   // recalculates stats shortly after addRawMeasurement and re-runs the mapping),
@@ -428,7 +485,7 @@ export function hydrateMeasurement(
     metadata: {
       ...aiMeta,
       toolName,
-      FrameOfReferenceUID: data.FrameOfReferenceUID,
+      FrameOfReferenceUID: frameOfReferenceUID,
       referencedImageId,
       SOPInstanceUID: data.SOPInstanceUID,
       SeriesInstanceUID: seriesInstanceUID,
@@ -438,7 +495,12 @@ export function hydrateMeasurement(
       label: data.label || '',
       handles: {
         points,
-        textBox: data.textBox,
+        textBox: data.textBox || {
+          hasMoved: false,
+          worldPosition:
+            points && points.length > 1 ? [points[1][0], points[1][1], points[1][2] + 20.0] : null,
+          worldBoundingBox: null,
+        },
       },
       cachedStats,
     },
