@@ -77,7 +77,17 @@
       "{projectRoot}/**/*",
       "sharedGlobals"
     ],
-    "sharedGlobals": [],
+    "sharedGlobals": [
+      {
+        "env": "APP_CONFIG"
+      },
+      {
+        "env": "PLUGIN_CONFIG"
+      },
+      {
+        "env": "PUBLIC_URL"
+      }
+    ],
     "production": [
       "default"
     ]

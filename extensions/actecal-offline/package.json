@@ -1,0 +1,12 @@
+{
+  "name": "@ohif/extension-actecal-offline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Public offline edition of Actecal Spectra: opens local DICOM files, folders and ZIPs in the browser and shows premium Spectra features as links",
+  "main": "src/index.js",
+  "dependencies": {
+    "@cornerstonejs/dicom-image-loader": "4.22.3",
+    "dcmjs": "0.49.4",
+    "react-dropzone": "10.2.2"
+  }
+}

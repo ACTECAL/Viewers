@@ -1,4 +1,10 @@
-const pluginConfig = require('../pluginConfig.json');
+// Actecal: PLUGIN_CONFIG (optional) picks another plugin list in platform/app, such as
+// pluginConfig.offline.json for the public offline edition (deploy-offline.sh). Default: pluginConfig.json.
+const pluginConfig = require(require('path').join(
+  __dirname,
+  '..',
+  require('path').basename(process.env.PLUGIN_CONFIG || 'pluginConfig.json')
+));
 const fs = require('fs');
 const os = require('os');
 

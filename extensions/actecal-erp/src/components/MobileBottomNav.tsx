@@ -722,8 +722,10 @@ function MobileBottomNav() {
 
   const location = useLocation();
   const isWorklist = location.pathname === '/' || location.pathname === '';
+  // The public offline edition (config/offline.js) has none of the Actecal panels this menu opens.
+  const isOfflineEdition = window.config?.actecal?.edition === 'offline';
 
-  if (!isMobile || isWorklist) return null;
+  if (!isMobile || isWorklist || isOfflineEdition) return null;
 
   return ReactDOM.createPortal(NavContent, document.body);
 }

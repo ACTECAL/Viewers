@@ -128,8 +128,8 @@ function Header({
 
               <div className="border-muted mx-1.5 h-[25px] border-r hidden md:block"></div>
 
-              {/* Doctor Login Placeholder */}
-              {!isReturnEnabled && (
+              {/* Doctor Login Placeholder (hidden in the public offline edition, which has no sign-in) */}
+              {!isReturnEnabled && window.config?.actecal?.edition !== 'offline' && (
                 <div className="hidden md:flex flex-shrink-0 items-center text-white mr-4 text-sm font-semibold">
                    DR BHARAT GUPTA
                 </div>
