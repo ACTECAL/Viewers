@@ -1,0 +1,8 @@
+node_modules/
+# The viewer build (npm run viewer) and the installers (npm run pack, npm run dist).
+app/viewer/
+release/
+# The repository ignores every build/ folder and package-lock.json (it uses yarn). This app needs both: build/ holds
+# the icon and the macOS entitlements, and CI installs from package-lock.json (npm ci).
+!/build/
+!/package-lock.json

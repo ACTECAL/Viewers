@@ -43,6 +43,10 @@ At `spectra.actecal.com/offline/`, in the Spectra bucket:
 
 Another option: a bucket and distribution of its own, such as a separate subdomain, built with `./build-offline.sh /`. That leaves the Spectra distribution and its deploy unchanged. Visitors' files also stay on an origin that does not share browser storage with the ERP viewer, which keeps the user's permission token in `localStorage`.
 
+## Spectra Desktop
+
+The desktop app (`desktop/`, TASK_PLAN 13) ships this edition built for `/`. The home page gets the app's file, folder and drive pickers when the app's bridge (`window.spectraDesktop`) is present, and the files the app found by address (`src/desktop.js`). In a browser the page is unchanged. See `desktop/README.md`.
+
 ## Checks
 
-There are no automated tests for this edition. Before a deploy, open a folder of DICOM files and a ZIP of them, scroll, measure, open MPR and the tag browser, press a locked button, reload on the viewer (the "study cleared" page appears), and open the home page on a phone. In the browser's network panel, nothing should go to another site.
+`cd desktop && npm run e2e -- web` runs this edition in Chrome, served at `/` with the recommended Content-Security-Policy and the CloudFront rewrite rule. It opens files, the three kinds of ZIP and a password-protected one, renders the images, runs MPR, presses a locked button, reloads on the viewer, opens an unknown address and checks the phone layout, with no console errors and no request to another site. It needs the build in `desktop/app/viewer` (`npm run viewer` there). Before a deploy, also open the tag browser and measure by hand.

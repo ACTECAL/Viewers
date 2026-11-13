@@ -115,6 +115,17 @@ Authorization: YES / NO / UNKNOWN
   - The share code = `study_shares.share_token`.
   - Whether `doctor_study_access.doctor_id` matches the viewer `userId` is UNKNOWN.
 
+## Standalone and desktop editions (no ERP)
+
+- **Standalone web edition** (`erp-architecture/TASK_PLAN.md`, TASK_PLAN 3): `extensions/actecal-offline`, `modes/actecal-offline`, `platform/app/public/config/offline.js` and `pluginConfig.offline.json`. It has no ERP calls, sign-in or server; files open into the in-memory `dicomlocal` data source. See `extensions/actecal-offline/README.md`.
+  - Build it with `./build-offline.sh [PUBLIC_URL]`, never through the root `yarn run build`.
+  - Keep its config free of ERP keys.
+- **Spectra Desktop** (TASK_PLAN 13): `desktop/`, an Electron app that ships the standalone edition built for `/`. See `desktop/README.md`.
+  - It has its own npm lockfile and is neither a yarn workspace nor a lerna package, so the web viewer's install and build never see it. Keep it outside `platform/`, `extensions/` and `modes/`.
+  - The shared home page switches its desktop parts on only when `window.spectraDesktop` exists.
+  - Keep the window sandboxed and the bridge small. The main process reads only what the user picked; the page cannot name a file.
+- **Do not build on `platform/electron`.** It is an earlier prototype that starts Orthanc with no authentication, open to the network.
+
 ## Cross-repository checks (required before implementation)
 
 - **API**: endpoint existence, request and response shape, auth (cookies, `x-user-id`, `x-perm`), tenant, and GCP token issuance.
@@ -125,5 +136,6 @@ Authorization: YES / NO / UNKNOWN
 
 - Use yarn workspaces.
 - `yarn run build` runs the viewer build. `deploy.sh` builds with `APP_CONFIG=config/default.js`, syncs `platform/app/dist` to S3 and invalidates CloudFront; never run `deploy.sh` without explicit approval.
-- `yarn run test:unit` runs the upstream Jest tests. The custom code has no tests.
+- `yarn run test:unit` runs the upstream Jest tests. The ERP custom code has no tests.
+- In `desktop/` (Node.js 22): `npm test` for unit tests, and `npm run e2e` for the standalone edition in Chrome plus the desktop app. The second needs `npm run viewer` first.
 - `yarn dev` starts a long-running dev server; ask the user to start it.

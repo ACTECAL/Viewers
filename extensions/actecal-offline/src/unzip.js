@@ -127,7 +127,8 @@ export async function entryToFile(zipFile, entry) {
   const start = entry.localOffset + 30 + header.getUint16(26, true) + header.getUint16(28, true);
   const data = zipFile.slice(start, start + entry.compressedSize);
   const name = entry.name.split('/').pop() || 'file';
-  if (entry.method === 0) return new File([data], name);
+  // A Blob in a browser; in Spectra Desktop a byte-range slice (desktop.js), fetched first.
+  if (entry.method === 0) return new File([data instanceof Blob ? data : await data.blob()], name);
   if (entry.method === 8) {
     if (!zipSupported()) throw new ZipError('unsupported-browser');
     const inflated = data.stream().pipeThrough(new DecompressionStream('deflate-raw'));

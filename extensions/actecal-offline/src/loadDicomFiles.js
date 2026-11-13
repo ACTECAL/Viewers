@@ -1,6 +1,7 @@
 // Loads DICOM files (and the DICOM files inside ZIPs) from the visitor's device into the in-memory
 // dicomlocal data source, the same way the upstream Local route does (platform/app/src/routes/Local),
 // but with ZIP support, a magic-number check, limited concurrency, progress, and only this batch's studies.
+// A browser gives File objects; Spectra Desktop gives files by address (desktop.js).
 import dcmjs from 'dcmjs';
 import dicomImageLoader from '@cornerstonejs/dicom-image-loader';
 import { DicomMetadataStore } from '@ohif/core';
@@ -55,8 +56,15 @@ export async function collectFiles(inputFiles) {
   return { items, problems };
 }
 
+// A file that Spectra Desktop gives by address (app://spectra/__open/…).
+async function fetchFile(item) {
+  const response = await fetch(item.url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return new File([await response.blob()], item.name || 'file');
+}
+
 async function loadOne(item) {
-  const file = item.file || (await entryToFile(item.zip, item.entry));
+  const file = item.file || (item.url ? await fetchFile(item) : await entryToFile(item.zip, item.entry));
   if (!(await isDicom(file))) return null;
   const imageId = dicomImageLoader.wadouri.fileManager.add(file);
   const buffer = await dicomImageLoader.wadouri.loadFileRequest(imageId);

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Spectra Desktop app icon: the Spectra mark (as in config/offline.js) on a dark tile with the macOS margins.
+       npm run icon renders it to icon.png, from which electron-builder makes the macOS, Windows and Linux icons. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141b3d"/>
+      <stop offset="1" stop-color="#05070f"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#tile)"/>
+  <g transform="translate(212 212) scale(6)">
+    <rect x="15" y="40" width="10" height="20" rx="5" fill="#5ACCE6" opacity="0.6"/>
+    <rect x="35" y="25" width="10" height="50" rx="5" fill="#0D6EFD" opacity="0.8"/>
+    <rect x="55" y="10" width="10" height="80" rx="5" fill="#FFFFFF"/>
+    <rect x="75" y="30" width="10" height="40" rx="5" fill="#5ACCE6"/>
+  </g>
+</svg>

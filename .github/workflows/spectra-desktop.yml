@@ -1,0 +1,79 @@
+# Spectra Desktop test builds (desktop/, erp-architecture TASK_PLAN 13). Runs when a spectra-desktop-v* tag is
+# pushed, or by hand from the Actions tab once this file is on the default branch. The viewer is built once on
+# Linux; the installers are then built on macOS, Windows and Linux and kept as workflow artifacts for 14 days.
+# Nothing is signed or published yet: signing, the Microsoft Store package and the update feed come in phase 5.
+name: Spectra Desktop
+on:
+  push:
+    tags: ['spectra-desktop-v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  viewer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: yarn
+      - name: Install the viewer's dependencies
+        run: yarn install --frozen-lockfile
+        env:
+          # The old platform/electron prototype is a yarn workspace; its Electron binary is not needed here.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - name: Build the standalone viewer for /
+        run: ./build-offline.sh /
+        env:
+          NODE_OPTIONS: --max_old_space_size=8192
+      - name: Copy it for the app (no source maps, no ONNX runtime)
+        run: node desktop/scripts/build-viewer.mjs --copy-only
+      - uses: actions/upload-artifact@v7
+        with:
+          name: viewer
+          path: desktop/app/viewer
+          if-no-files-found: error
+          retention-days: 3
+  package:
+    needs: viewer
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: --mac
+          - os: windows-latest
+            platform: --win
+          - os: ubuntu-latest
+            platform: --linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - uses: actions/download-artifact@v8
+        with:
+          name: viewer
+          path: desktop/app/viewer
+      - name: Build the installers (unsigned)
+        run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.platform }} --publish never
+      - uses: actions/upload-artifact@v7
+        with:
+          name: spectra-desktop-${{ runner.os }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+          if-no-files-found: error
+          retention-days: 14
