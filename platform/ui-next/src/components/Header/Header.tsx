@@ -24,6 +24,8 @@ interface HeaderProps {
   }>;
   isReturnEnabled?: boolean;
   onClickReturnButton?: () => void;
+  // A tooltip for the back arrow (Spectra Desktop: "Back to the library").
+  returnTitle?: string;
   isSticky?: boolean;
   WhiteLabeling?: {
     createLogoComponentFn?: (React: any, props: any) => ReactNode;
@@ -38,6 +40,7 @@ function Header({
   menuOptions,
   isReturnEnabled = true,
   onClickReturnButton,
+  returnTitle,
   isSticky = false,
   WhiteLabeling,
   PatientInfo,
@@ -98,6 +101,7 @@ function Header({
                   isReturnEnabled && 'cursor-pointer'
                 )}
                 onClick={onClickReturn}
+                title={isReturnEnabled ? returnTitle : undefined}
                 data-cy="return-to-work-list"
               >
                 {isReturnEnabled && <Icons.ArrowLeft className="text-primary ml-1 h-7 w-7" />}

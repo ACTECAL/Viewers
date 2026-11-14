@@ -120,10 +120,12 @@ Authorization: YES / NO / UNKNOWN
 - **Standalone web edition** (`erp-architecture/TASK_PLAN.md`, TASK_PLAN 3): `extensions/actecal-offline`, `modes/actecal-offline`, `platform/app/public/config/offline.js` and `pluginConfig.offline.json`. It has no ERP calls, sign-in or server; files open into the in-memory `dicomlocal` data source. See `extensions/actecal-offline/README.md`.
   - Build it with `./build-offline.sh [PUBLIC_URL]`, never through the root `yarn run build`.
   - Keep its config free of ERP keys.
-- **Spectra Desktop** (TASK_PLAN 13): `desktop/`, an Electron app that ships the standalone edition built for `/`. See `desktop/README.md`.
+- **Spectra Desktop** (TASK_PLAN 13): `desktop/`, an Electron app that ships the standalone edition built for `/`, with a local study library. See `desktop/README.md`.
   - It has its own npm lockfile and is neither a yarn workspace nor a lerna package, so the web viewer's install and build never see it. Keep it outside `platform/`, `extensions/` and `modes/`.
-  - The shared home page switches its desktop parts on only when `window.spectraDesktop` exists.
-  - Keep the window sandboxed and the bridge small. The main process reads only what the user picked; the page cannot name a file.
+  - The shared home page shows the library (`extensions/actecal-offline/src/components/library/`) only when `window.spectraDesktop` exists; in a browser it is the web page. The same check turns the viewer's back arrow into "Back to the library" (`extensions/default/src/ViewerLayout/ViewerHeader.tsx`).
+  - Keep the window sandboxed and the bridge small. The main process reads only what the user picked and the library's own files; the page cannot name a file, and every IPC argument is checked (`desktop/src/main/validate.js`).
+  - The library holds personal health information: keep it in the app's local data folder, never in a synced folder; never log patient fields or paths; ask in a native dialog before deleting or moving it.
+  - The library index uses `node:sqlite` (no native modules). A schema change needs a new `SCHEMA_VERSION` and a migration in `desktop/src/main/library.js`; a library made by a newer version is refused, not changed.
 - **Do not build on `platform/electron`.** It is an earlier prototype that starts Orthanc with no authentication, open to the network.
 
 ## Cross-repository checks (required before implementation)

@@ -6,14 +6,15 @@ A DICOM viewer built from this repository with no ERP, sign-in, server or analyt
 
 | What | Where |
 |---|---|
-| Home page (drop zone, file and folder pickers), friendly 404 and "study cleared" pages, premium dialog and panel | `extensions/actecal-offline/` |
+| Home page (drop zone, file and folder pickers), friendly 404 and "study cleared" pages, premium dialog and panel | `extensions/actecal-offline/` (`components/WebHome.tsx`; `components/OfflineHome.tsx` picks the web page or Spectra Desktop's library) |
+| Loading files into the viewer and the wording of what went wrong, shared by the web page and the desktop library | `extensions/actecal-offline/src/opening.js`, `loadDicomFiles.js` |
 | ZIP reading (stored, deflate, ZIP64; password-protected entries refused) with the browser's DecompressionStream | `extensions/actecal-offline/src/unzip.js` |
 | The viewer: upstream basic mode plus three locked buttons (AI analysis, Report, Share) | `modes/actecal-offline/` |
 | Configuration: data source, links, `onboardingLive`; follows the build's `PUBLIC_URL` | `platform/app/public/config/offline.js` |
 | Plugin list (selected with `PLUGIN_CONFIG`) | `platform/app/pluginConfig.offline.json` |
 | Build, deploy, CloudFront function | `build-offline.sh`, `deploy-offline.sh`, `infra/cloudfront-offline-rewrite.js` |
 
-Shared files with an edition check: `platform/app/.webpack/writePluginImportsFile.js` (reads `PLUGIN_CONFIG`), `platform/ui-next/src/components/Header/Header.tsx` (no placeholder doctor name) and `extensions/actecal-erp/src/components/MobileBottomNav.tsx` (no Actecal mobile menu). `nx.json` hashes `APP_CONFIG`, `PLUGIN_CONFIG` and `PUBLIC_URL`, so that the root `yarn run build` never reuses one edition's result for the other.
+Shared files with an edition check: `platform/app/.webpack/writePluginImportsFile.js` (reads `PLUGIN_CONFIG`), `platform/ui-next/src/components/Header/Header.tsx` (no placeholder doctor name; a tooltip for the back arrow), `extensions/default/src/ViewerLayout/ViewerHeader.tsx` (in Spectra Desktop the back arrow returns to the library) and `extensions/actecal-erp/src/components/MobileBottomNav.tsx` (no Actecal mobile menu). `nx.json` hashes `APP_CONFIG`, `PLUGIN_CONFIG` and `PUBLIC_URL`, so that the root `yarn run build` never reuses one edition's result for the other.
 
 The edition does not include `@ohif/extension-actecal-erp` or `@ohif/mode-actecal-radiology`, and its config has no `apiBaseUrl`, tenant, auth, AI, GPU or scribe keys, so it never calls erp-api.
 
@@ -45,7 +46,7 @@ Another option: a bucket and distribution of its own, such as a separate subdoma
 
 ## Spectra Desktop
 
-The desktop app (`desktop/`, TASK_PLAN 13) ships this edition built for `/`. The home page gets the app's file, folder and drive pickers when the app's bridge (`window.spectraDesktop`) is present, and the files the app found by address (`src/desktop.js`). In a browser the page is unchanged. See `desktop/README.md`.
+The desktop app (`desktop/`, TASK_PLAN 13) ships this edition built for `/`. When the app's bridge (`window.spectraDesktop`) is present, the home page is the study library (`src/components/library/`): import, search, open, export and delete, through the bridge, with files given by address (`src/desktop.js`). In a browser the page is unchanged (`WebHome.tsx`). See `desktop/README.md`.
 
 ## Checks
 

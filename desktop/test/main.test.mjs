@@ -1,4 +1,5 @@
-// The small main-process modules: addresses, the command line, drives and the menu.
+// The small main-process modules: addresses, the command line, drives, the menu, the window's place, the library's
+// dialogs and the checks on what the page sends.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,6 +9,9 @@ import urls from '../src/main/urls.js';
 import argv from '../src/main/argv.js';
 import drives from '../src/main/drives.js';
 import menu from '../src/main/menu.js';
+import windowState from '../src/main/windowState.js';
+import dialogs from '../src/main/dialogs.js';
+import validate from '../src/main/validate.js';
 
 function temp(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spectra-main-'));
@@ -85,19 +89,151 @@ test('a drive with a DICOMDIR at the top is a DICOM disc', async (t) => {
   assert.equal((await drives.withDicomdirFlag({ name: 'gone', path: path.join(root, 'gone'), kind: 'usb' })).dicomdir, false);
 });
 
-test('the menu: File actions everywhere, the Edit menu on macOS only, developer items only from source', () => {
+test('the menu: Import and Open everywhere, Settings in the app menu on macOS, developer items only from source', () => {
   const calls = [];
   const actions = new Proxy({}, { get: (_target, name) => () => calls.push(name) });
-  const ids = (template) => template.flatMap((item) => item.submenu || []).map((item) => item.id).filter(Boolean);
+  const items = (template) => template.flatMap((item) => item.submenu || []);
+  const ids = (template) => items(template).map((item) => item.id).filter(Boolean);
   const roles = (template) => template.flatMap((item) => [item.role, ...(item.submenu || []).map((entry) => entry.role)]).filter(Boolean);
   const mac = menu.menuTemplate({ appName: 'Spectra Desktop', isMac: true, isPackaged: true, actions });
   const windows = menu.menuTemplate({ appName: 'Spectra Desktop', isMac: false, isPackaged: true, actions });
   const source = menu.menuTemplate({ appName: 'Spectra Desktop', isMac: false, isPackaged: false, actions });
-  for (const template of [mac, windows]) assert.deepEqual(ids(template), ['open-files', 'open-folder', 'open-drive', 'close-study']);
+  const file = ['import-files', 'import-folder', 'import-drive', 'open-files', 'open-folder', 'open-drive', 'close-study'];
+  assert.deepEqual(ids(mac), ['settings', ...file]);
+  assert.deepEqual(ids(windows), [...file, 'settings']);
   assert.ok(roles(mac).includes('paste'));
   assert.ok(!roles(windows).includes('paste'));
   assert.ok(!roles(windows).includes('toggleDevTools'));
   assert.ok(roles(source).includes('toggleDevTools'));
-  windows[0].submenu.find((item) => item.id === 'close-study').click();
-  assert.deepEqual(calls, ['closeStudy']);
+  // No two items share a shortcut, and none is a key the viewer uses on its own.
+  for (const template of [mac, windows, source]) {
+    const keys = items(template).map((item) => item.accelerator).filter(Boolean);
+    assert.equal(new Set(keys).size, keys.length, keys.join(' '));
+    assert.ok(keys.every((key) => /^(CmdOrCtrl\+|F\d+$)/.test(key)), keys.join(' '));
+  }
+  for (const id of ['import-folder', 'open-drive', 'close-study', 'settings']) items(windows).find((item) => item.id === id).click();
+  assert.deepEqual(calls, ['importFolder', 'openDrives', 'closeStudy', 'settings']);
+});
+
+test('right-click menus: studies in the library, and text fields', () => {
+  const chosen = [];
+  const one = menu.studyMenuTemplate({ count: 1, locked: false, choose: (action) => chosen.push(action) });
+  assert.deepEqual(one.filter((item) => item.label).map((item) => item.label), ['Open', 'Export…', 'Delete…']);
+  for (const item of one.filter((entry) => entry.click)) item.click();
+  assert.deepEqual(chosen, ['open', 'export', 'delete']);
+  const three = menu.studyMenuTemplate({ count: 3, locked: true, choose: () => {} });
+  assert.deepEqual(
+    three.filter((item) => item.label).map((item) => [item.label, item.enabled !== false]),
+    [
+      ['Open Together', true],
+      ['Export 3 Studies…', false],
+      ['Delete 3 Studies…', false],
+    ]
+  );
+  const roles = (template) => template.map((item) => item.role || item.type);
+  assert.deepEqual(roles(menu.editMenuTemplate({ isEditable: true, editFlags: { canPaste: true } })), ['cut', 'copy', 'paste', 'separator', 'selectAll']);
+  assert.deepEqual(menu.editMenuTemplate({ isEditable: true, editFlags: { canPaste: true } }).map((item) => item.enabled), [false, false, true, undefined, false]);
+  assert.deepEqual(roles(menu.editMenuTemplate({ isEditable: false, editFlags: { canCopy: true } })), ['copy']);
+});
+
+test('dialogs: the import notice, delete confirmations and names', () => {
+  const notice = dialogs.importNotice('/Users/asha/Library/Application Support/Spectra Desktop/Library');
+  assert.deepEqual(notice.buttons, ['Import', 'Cancel']);
+  assert.equal(notice.cancelId, 1);
+  assert.match(notice.detail, /Application Support\/Spectra Desktop\/Library/);
+  assert.match(notice.detail, /personal health information/);
+  assert.equal(notice.checkboxLabel, "Don't show this again");
+  const one = dialogs.deleteConfirmation([{ patientName: 'Sharma^Asha', studyDescription: 'CT Chest', studyDate: '20260105' }]);
+  assert.equal(one.message, 'Delete this study from the library?');
+  assert.match(one.detail, /^Sharma, Asha, CT Chest, 5 Jan 2026\n/);
+  assert.equal(one.defaultId, 1, 'Cancel is the default');
+  assert.equal(dialogs.deleteConfirmation([{}, {}, {}]).message, 'Delete 3 studies from the library?');
+  assert.equal(dialogs.formatName('Sharma^Asha^K'), 'Sharma, Asha K');
+  assert.equal(dialogs.formatName('ANONYMOUS'), 'ANONYMOUS');
+  assert.equal(dialogs.formatName('Verma^'), 'Verma');
+  assert.equal(dialogs.formatDate('20261113'), '13 Nov 2026');
+  assert.equal(dialogs.formatDate('2026'), '');
+  assert.equal(dialogs.formatBytes(999), '999 bytes');
+  assert.equal(dialogs.formatBytes(1_400_000_000), '1.4 GB');
+  assert.equal(dialogs.formatBytes(250_000_000), '250 MB');
+});
+
+test('choosing a library folder: use, move, start new, or refuse', (t) => {
+  const root = temp(t);
+  const current = path.join(root, 'Library');
+  fs.mkdirSync(path.join(current, 'studies'), { recursive: true });
+  fs.writeFileSync(path.join(current, 'library.db'), '');
+  const plan = (chosen, studies = 3) => dialogs.libraryPlan({ chosen, current, studies });
+  assert.deepEqual(plan(current), { action: 'same', target: current });
+  // An empty folder takes the library itself; a folder with other files gets a "Spectra Library" folder.
+  const empty = path.join(root, 'empty');
+  fs.mkdirSync(empty);
+  fs.writeFileSync(path.join(empty, '.DS_Store'), '');
+  assert.deepEqual(plan(empty), { action: 'move', target: empty });
+  assert.deepEqual(plan(empty, 0), { action: 'new', target: empty });
+  const documents = path.join(root, 'Documents');
+  fs.mkdirSync(documents);
+  fs.writeFileSync(path.join(documents, 'letter.txt'), 'x');
+  assert.deepEqual(plan(documents), { action: 'move', target: path.join(documents, 'Spectra Library') });
+  assert.deepEqual(plan(path.join(root, 'not-yet')), { action: 'move', target: path.join(root, 'not-yet') });
+  // Another library, chosen directly or by the folder that holds it.
+  const other = path.join(root, 'USB', 'Spectra Library');
+  fs.mkdirSync(other, { recursive: true });
+  fs.writeFileSync(path.join(other, 'library.db'), '');
+  assert.deepEqual(plan(other), { action: 'use', target: other });
+  assert.deepEqual(plan(path.join(root, 'USB')), { action: 'use', target: other });
+  // Folders that cannot take it.
+  const busy = path.join(root, 'busy');
+  fs.mkdirSync(path.join(busy, 'Spectra Library'), { recursive: true });
+  fs.writeFileSync(path.join(busy, 'file.txt'), 'x');
+  fs.writeFileSync(path.join(busy, 'Spectra Library', 'file.txt'), 'x');
+  assert.equal(plan(busy).action, 'refuse');
+  assert.equal(plan(path.join(current, 'studies')).action, 'refuse');
+  // With no library open (its drive is gone), any empty folder starts a new one.
+  assert.deepEqual(dialogs.libraryPlan({ chosen: empty, current: null, studies: 0 }), { action: 'new', target: empty });
+});
+
+test('what the page sends is checked', () => {
+  assert.deepEqual(validate.uidList(['1.2.3', '1.2.3', '1.2.4']), ['1.2.3', '1.2.4']);
+  for (const bad of [[], 'x', [1], ['has space'], ['a'.repeat(129)], Array(201).fill('1.2')]) assert.throws(() => validate.uidList(bad), JSON.stringify(bad).slice(0, 40));
+  assert.equal(validate.uid('1.2.840'), '1.2.840');
+  assert.throws(() => validate.uid(['1.2']));
+  assert.deepEqual(validate.listQuery({ text: 'asha', modalities: ['CT', 'ct', "x' OR 1"], from: '20260101', to: 'today', sort: 'patientName', direction: 'asc', limit: 50 }), {
+    text: 'asha',
+    modalities: ['CT'],
+    from: '20260101',
+    to: '',
+    sort: 'patientName',
+    direction: 'asc',
+    limit: 50,
+  });
+  assert.deepEqual(validate.listQuery('nonsense'), { text: '', modalities: [], from: '', to: '', sort: 'studyDate', direction: 'desc', limit: 1000 });
+  assert.equal(validate.listQuery({ sort: 'study_uid; DROP TABLE studies', limit: 10 ** 9 }).sort, 'studyDate');
+  assert.equal(validate.listQuery({ limit: 10 ** 9 }).limit, 5000);
+  const absolute = path.resolve('/tmp/a/../b');
+  assert.deepEqual(validate.pathList([absolute]), [absolute]);
+  for (const bad of [[], ['relative/path'], ['/tmp/x\0y'], [42], 'not a list']) assert.throws(() => validate.pathList(bad));
+  assert.equal(validate.oneOf('folder', ['files', 'folder'], 'files'), 'folder');
+  assert.equal(validate.oneOf('../etc', ['files', 'folder'], 'files'), 'files');
+});
+
+test('the window comes back where it was, unless that screen is gone', () => {
+  const { DEFAULT_BOUNDS, MIN_BOUNDS, restoreBounds } = windowState;
+  const laptop = { x: 0, y: 0, width: 1512, height: 944 };
+  const monitor = { x: 1512, y: -200, width: 2560, height: 1415 };
+  assert.deepEqual(restoreBounds(undefined, [laptop]), { ...DEFAULT_BOUNDS, maximized: false });
+  assert.deepEqual(restoreBounds({ x: 'a', y: 0, width: 1, height: 1 }, [laptop]), { ...DEFAULT_BOUNDS, maximized: false });
+  assert.deepEqual(restoreBounds({ x: 100, y: 50, width: 1200, height: 800 }, [laptop]), { x: 100, y: 50, width: 1200, height: 800, maximized: false });
+  assert.deepEqual(restoreBounds({ x: 1600, y: -100, width: 1800, height: 1000, maximized: true }, [laptop, monitor]), {
+    x: 1600,
+    y: -100,
+    width: 1800,
+    height: 1000,
+    maximized: true,
+  });
+  // The monitor was unplugged: the size is kept and the system places the window.
+  assert.deepEqual(restoreBounds({ x: 1600, y: -100, width: 1800, height: 1000 }, [laptop]), { width: 1800, height: 1000, maximized: false });
+  // Never smaller than the minimum, never larger than the screen.
+  assert.deepEqual(restoreBounds({ x: 10, y: 10, width: 200, height: 100 }, [laptop]), { x: 10, y: 10, ...MIN_BOUNDS, maximized: false });
+  assert.deepEqual(restoreBounds({ x: 0, y: 0, width: 4000, height: 3000 }, [laptop]), { x: 0, y: 0, width: 1512, height: 944, maximized: false });
 });

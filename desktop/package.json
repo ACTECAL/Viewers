@@ -1,7 +1,7 @@
 {
   "name": "spectra-desktop",
   "productName": "Spectra Desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Spectra Desktop by Actecal: a free DICOM viewer for Windows, macOS and Linux",
   "author": {
     "name": "Actecal Private Limited",
@@ -33,6 +33,6 @@
     "playwright-core": "1.65.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   }
 }

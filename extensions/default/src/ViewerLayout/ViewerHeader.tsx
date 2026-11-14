@@ -106,7 +106,16 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
     }
   };
 
+  // Spectra Desktop (desktop/, TASK_PLAN 13): the back arrow returns to the study library. The app reloads its
+  // home page, which also frees the study's memory. The web editions are unchanged.
+  const bridge = (window as any).spectraDesktop;
+  const desktop = bridge?.edition === 'desktop' ? bridge : null;
+
   const onClickReturnButton = () => {
+    if (desktop) {
+      desktop.closeStudy();
+      return;
+    }
     const { pathname } = location;
     const dataSourceIdx = pathname.indexOf('/', 1);
 
@@ -226,7 +235,8 @@ function ViewerHeader({ appConfig }: withAppTypes<{ appConfig: AppTypes.Config }
   return (
     <Header
       menuOptions={menuOptions}
-      isReturnEnabled={!!appConfig.showStudyList}
+      isReturnEnabled={!!appConfig.showStudyList || Boolean(desktop)}
+      returnTitle={desktop ? 'Back to the library' : undefined}
       onClickReturnButton={onClickReturnButton}
       WhiteLabeling={appConfig.whiteLabeling}
       Secondary={<Toolbar buttonSection="secondary" />}

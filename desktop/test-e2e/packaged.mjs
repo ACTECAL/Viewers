@@ -1,5 +1,6 @@
 // The packaged app (npm run pack; macOS for now): its fuses, its signature, what app.asar holds, what Finder may open
-// with it, and that it starts, opens a folder from the command line and renders the study. Playwright cannot attach
+// with it, and that it starts, opens a folder from the command line, renders the study and opens its library (SQLite
+// in the packaged app). Playwright cannot attach
 // to a packaged app, because a fuse turns off its Node.js inspector, so the page is reached through Chromium's
 // remote debugging port. The app runs with its real profile, which is removed afterwards if the test created it.
 import { execFileSync, spawn } from 'node:child_process';
@@ -60,6 +61,7 @@ check(
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'spectra-packaged-'));
 const profile = path.join(os.homedir(), 'Library', 'Application Support', 'Spectra Desktop');
 const hadProfile = fs.existsSync(profile);
+const hadLibrary = fs.existsSync(path.join(profile, 'Library', 'library.db'));
 const series = writeSeries(path.join(data, 'ct'), { slices: 12 });
 const child = spawn(path.join(appPath, 'Contents', 'MacOS', 'Spectra Desktop'), [`--remote-debugging-port=${PORT}`, series.dir], { stdio: 'ignore' });
 let browser;
@@ -75,6 +77,15 @@ try {
   check('Packaged app: opens a folder from the command line and renders it', stats.grey >= 0.1 && sameSet(studiesInUrl(page), [series.studyUID]), `grey ${stats.grey}`);
   const bridge = page ? await page.evaluate(() => ({ edition: window.spectraDesktop && window.spectraDesktop.edition, require: typeof window.require })) : {};
   check('Packaged app: the bridge is there, and Node.js is not', bridge.edition === 'desktop' && bridge.require === 'undefined', JSON.stringify(bridge));
+  // The library: SQLite (node:sqlite) runs in the packaged app, in the usual place, and opening from the command
+  // line imported nothing.
+  const library = page ? await page.evaluate(() => window.spectraDesktop.libraryInfo()).catch((error) => ({ error: String(error) })) : {};
+  const expectedRoot = path.join(profile, 'Library');
+  check(
+    'Packaged app: the library opens in ~/Library/Application Support/Spectra Desktop/Library, and the command line imported nothing',
+    library.available === true && library.root === expectedRoot && library.studies === (hadLibrary ? library.studies : 0) && fs.existsSync(path.join(expectedRoot, 'library.db')),
+    JSON.stringify({ available: library.available, root: library.root === expectedRoot ? 'expected' : library.root, studies: library.studies, error: library.error })
+  );
 } finally {
   if (browser) await browser.close().catch(() => {});
   child.kill();
